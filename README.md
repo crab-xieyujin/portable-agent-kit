@@ -172,6 +172,10 @@ Create a sample portable agent package.
 ```bash
 portable-agent init
 portable-agent init --agent my-agent
+portable-agent init --type coding
+portable-agent init --type writer
+portable-agent init --type presales
+portable-agent init --type architect
 portable-agent init --agent my-agent --force
 ```
 
@@ -205,7 +209,13 @@ portable-agent export --target workbuddy
 ```txt
 agent/
   agent.json
+  identity.md
+  soul.md
   instructions.md
+  workflow.md
+  user.md
+  tools.md
+  memory.md
   capabilities.json
   skills/
     codebase-reading.md
@@ -213,6 +223,15 @@ agent/
   evals/
     smoke-tests.md
 ```
+
+The optional core files let one source package export richer workspace-shaped agents:
+
+- `identity.md`: short external identity card
+- `soul.md`: stable judgment, truths, and boundaries
+- `workflow.md`: default task flow and output tendencies
+- `user.md`: user profile slots, not task logs
+- `tools.md`: role-specific environment and tool preferences
+- `memory.md`: long-term memory structure
 
 ### Platform Adapters
 
@@ -271,7 +290,7 @@ These are not meant to replace platform-native tools. They are safety nets for d
 - Wukong
 - WorkBuddy
 
-OpenClaw exports are workspace-shaped and Claude exports include `CLAUDE.md`. Accio Work, Wukong, and WorkBuddy exports are setup guides because public, stable file-import formats are not assumed. If those platforms later expose import APIs or package formats, add new adapter renderers in `src/cli.js`.
+OpenClaw exports are full workspace-shaped packages. They include `AGENTS.md`, `IDENTITY.md`, `SOUL.md`, `BOOTSTRAP.md`, `USER.md`, `TOOLS.md`, `MEMORY.md`, `HEARTBEAT.md`, `.openclaw/workspace-state.json`, copied `skills/`, setup notes, and a compatibility report. Claude exports include `CLAUDE.md`. Accio Work, Wukong, and WorkBuddy exports are setup guides because public, stable file-import formats are not assumed. If those platforms later expose import APIs or package formats, add new adapter renderers in `src/cli.js`.
 
 ### Roadmap
 
@@ -354,6 +373,7 @@ agent/
 ```bash
 portable-agent doctor --target codex
 portable-agent doctor --target openclaw
+portable-agent doctor --target claude
 portable-agent doctor --target accio-work
 portable-agent doctor --target wukong
 portable-agent doctor --target workbuddy
@@ -452,6 +472,10 @@ Portable Agent Kit 把这些能力视为一份 capability contract。
 ```bash
 portable-agent init
 portable-agent init --agent my-agent
+portable-agent init --type coding
+portable-agent init --type writer
+portable-agent init --type presales
+portable-agent init --type architect
 portable-agent init --agent my-agent --force
 ```
 
@@ -473,6 +497,8 @@ portable-agent doctor --target workbuddy
 
 ```bash
 portable-agent export --target codex
+portable-agent export --target openclaw
+portable-agent export --target claude
 portable-agent export --target wukong --out exported/wukong
 portable-agent export --target workbuddy
 ```
@@ -482,7 +508,13 @@ portable-agent export --target workbuddy
 ```txt
 agent/
   agent.json
+  identity.md
+  soul.md
   instructions.md
+  workflow.md
+  user.md
+  tools.md
+  memory.md
   capabilities.json
   skills/
     codebase-reading.md
@@ -490,6 +522,15 @@ agent/
   evals/
     smoke-tests.md
 ```
+
+这些可选核心文件用于导出更完整的工作区型 Agent：
+
+- `identity.md`：极简身份卡
+- `soul.md`：长期稳定的判断、真话和边界
+- `workflow.md`：默认任务流程和产出倾向
+- `user.md`：用户画像槽位，不放任务流水
+- `tools.md`：角色专属环境和工具偏好
+- `memory.md`：长期记忆结构
 
 ### 平台适配器
 
@@ -546,7 +587,7 @@ fallbacks/text_search.py
 - Wukong
 - WorkBuddy
 
-Accio Work、Wukong 和 WorkBuddy 目前导出的是 setup guide，因为这里不假设它们已经有公开稳定的文件导入格式。如果这些平台之后开放导入 API 或 Agent package 格式，可以在 `src/cli.js` 里增加新的 adapter renderer。
+OpenClaw 会导出完整工作区包，包括 `AGENTS.md`、`IDENTITY.md`、`SOUL.md`、`BOOTSTRAP.md`、`USER.md`、`TOOLS.md`、`MEMORY.md`、`HEARTBEAT.md`、`.openclaw/workspace-state.json`、复制后的 `skills/`、安装说明和兼容性报告。Accio Work、Wukong 和 WorkBuddy 目前导出的是 setup guide，因为这里不假设它们已经有公开稳定的文件导入格式。如果这些平台之后开放导入 API 或 Agent package 格式，可以在 `src/cli.js` 里增加新的 adapter renderer。
 
 ### 路线图
 
