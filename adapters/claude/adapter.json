@@ -1,0 +1,22 @@
+{
+  "name": "Claude",
+  "supports": {
+    "filesystem.read": "project_files_or_upload",
+    "filesystem.search": "limited_project_search_or_manual_index",
+    "shell.run": "none_or_external_mcp",
+    "browser.use": "web_search_if_enabled_or_user_links",
+    "git.inspect": "user_provided_diff_or_project_files",
+    "patch.edit": "manual_patch_or_platform_editor",
+    "mcp.use": "check_platform_support",
+    "memory.persist": "project_instructions_or_user_supplied_context"
+  },
+  "setup": [
+    "Place the generated CLAUDE.md at the project root for Claude-family project instructions.",
+    "Attach the agent folder or copy relevant skill files into project knowledge.",
+    "Map unavailable shell, patch, browser, or MCP capabilities to manual handoff steps."
+  ],
+  "notes": [
+    "Claude-style project files are instruction carriers, not a full agent workspace contract.",
+    "Keep tool claims conditional because Claude deployments differ by product and workspace settings."
+  ]
+}

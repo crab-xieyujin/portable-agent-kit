@@ -1,5 +1,25 @@
 {
   "name": "OpenClaw",
+  "workspaceContract": {
+    "requiredFiles": [
+      "AGENTS.md",
+      "SOUL.md",
+      "IDENTITY.md",
+      "USER.md",
+      "TOOLS.md"
+    ],
+    "optionalFiles": [
+      "BOOT.md",
+      "BOOTSTRAP.md",
+      "HEARTBEAT.md",
+      "MEMORY.md",
+      "memory.md",
+      "memory/*.md"
+    ],
+    "skillDirectory": "skills",
+    "packageTool": "clawpacker",
+    "packageFormat": ".ocpkg"
+  },
   "supports": {
     "filesystem.read": "native_or_workspace_file_access",
     "filesystem.search": "native_search_or_shell_if_enabled",
@@ -11,11 +31,13 @@
     "memory.persist": "project_skill_files"
   },
   "setup": [
-    "Create a custom skill from the generated SKILL.md.",
+    "Use the generated OpenClaw workspace files directly: AGENTS.md, SOUL.md, IDENTITY.md, USER.md, and TOOLS.md.",
+    "Keep generated skills/ with the workspace so clawpacker can include workspace-owned skill implementations.",
     "Attach project files or workspace permissions before running codebase-reading tasks.",
-    "Map missing shell and patch operations to the platform's own edit tools."
+    "Run clawpacker inspect or validate on the generated workspace before packaging it as .ocpkg."
   ],
   "notes": [
+    "This export is shaped as an OpenClaw workspace, not only as a single skill document.",
     "OpenClaw-like platforms often differ in shell and file-search behavior.",
     "Run evals after setup to catch hidden dependency gaps."
   ]
