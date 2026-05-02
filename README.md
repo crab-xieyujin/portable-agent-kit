@@ -70,6 +70,7 @@ Check compatibility with a target platform:
 ```bash
 portable-agent doctor --target codex
 portable-agent doctor --target openclaw
+portable-agent doctor --target claude
 portable-agent doctor --target accio-work
 portable-agent doctor --target wukong
 portable-agent doctor --target workbuddy
@@ -80,6 +81,7 @@ Export a platform-specific package:
 ```bash
 portable-agent export --target codex
 portable-agent export --target openclaw
+portable-agent export --target claude
 portable-agent export --target accio-work
 portable-agent export --target wukong
 portable-agent export --target workbuddy
@@ -120,8 +122,15 @@ For platforms that support file-based agents, such as Codex-like coding agents, 
 
 ```txt
 dist/codex/AGENTS.md
-dist/openclaw/SKILL.md
+dist/claude/CLAUDE.md
+dist/openclaw/AGENTS.md
+dist/openclaw/SOUL.md
+dist/openclaw/IDENTITY.md
+dist/openclaw/USER.md
+dist/openclaw/TOOLS.md
 ```
+
+OpenClaw exports are full workspace-shaped packages. They include the core bootstrap files expected by OpenClaw tooling plus copied workspace-owned skills under `dist/openclaw/skills/`. You can run `clawpacker inspect`, `clawpacker validate`, or `clawpacker export` against that generated workspace when the Clawpacker CLI is installed.
 
 ### Why Not Just Copy the Prompt?
 
@@ -173,6 +182,7 @@ Check whether a target platform can support the agent.
 ```bash
 portable-agent doctor --target codex
 portable-agent doctor --target openclaw
+portable-agent doctor --target claude
 portable-agent doctor --target accio-work
 portable-agent doctor --target wukong
 portable-agent doctor --target workbuddy
@@ -184,6 +194,8 @@ Generate platform-specific setup files.
 
 ```bash
 portable-agent export --target codex
+portable-agent export --target openclaw
+portable-agent export --target claude
 portable-agent export --target wukong --out exported/wukong
 portable-agent export --target workbuddy
 ```
@@ -210,6 +222,7 @@ Adapters live in:
 adapters/
   codex/adapter.json
   openclaw/adapter.json
+  claude/adapter.json
   accio-work/adapter.json
   wukong/adapter.json
   workbuddy/adapter.json
@@ -253,11 +266,12 @@ These are not meant to replace platform-native tools. They are safety nets for d
 
 - Codex
 - OpenClaw
+- Claude
 - Accio Work
 - Wukong
 - WorkBuddy
 
-Accio Work, Wukong, and WorkBuddy exports are setup guides because public, stable file-import formats are not assumed. If those platforms later expose import APIs or package formats, add new adapter renderers in `src/cli.js`.
+OpenClaw exports are workspace-shaped and Claude exports include `CLAUDE.md`. Accio Work, Wukong, and WorkBuddy exports are setup guides because public, stable file-import formats are not assumed. If those platforms later expose import APIs or package formats, add new adapter renderers in `src/cli.js`.
 
 ### Roadmap
 
@@ -390,7 +404,12 @@ portable-agent export --target wukong
 
 ```txt
 dist/codex/AGENTS.md
-dist/openclaw/SKILL.md
+dist/claude/CLAUDE.md
+dist/openclaw/AGENTS.md
+dist/openclaw/SOUL.md
+dist/openclaw/IDENTITY.md
+dist/openclaw/USER.md
+dist/openclaw/TOOLS.md
 ```
 
 ### 为什么不能只复制 Prompt？
