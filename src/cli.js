@@ -50,6 +50,10 @@ async function readText(file) {
   return readFile(file, "utf8");
 }
 
+async function readOptionalText(file) {
+  return existsSync(file) ? readText(file) : "";
+}
+
 async function writeText(file, content) {
   await mkdir(path.dirname(file), { recursive: true });
   await writeFile(file, content, "utf8");
@@ -59,6 +63,16 @@ async function listMarkdown(dir) {
   if (!existsSync(dir)) return [];
   const names = await readdir(dir);
   return names.filter((name) => name.endsWith(".md")).sort();
+}
+
+function bodyWithoutTitle(markdown, title) {
+  const trimmed = markdown.trim();
+  if (!trimmed) return "";
+  const lines = trimmed.split(/\r?\n/);
+  if (lines[0].trim().toLowerCase() === `# ${title}`.toLowerCase()) {
+    return lines.slice(1).join("\n").trim();
+  }
+  return trimmed;
 }
 
 function resolveAgentDir(args) {
@@ -78,9 +92,13 @@ async function loadAgent(agentDir) {
     agentDir,
     agent: await readJson(agentFile),
     capabilities: await readJson(capabilitiesFile),
-    instructions: existsSync(path.join(agentDir, "instructions.md"))
-      ? await readText(path.join(agentDir, "instructions.md"))
-      : "",
+    identity: await readOptionalText(path.join(agentDir, "identity.md")),
+    soul: await readOptionalText(path.join(agentDir, "soul.md")),
+    instructions: await readOptionalText(path.join(agentDir, "instructions.md")),
+    workflow: await readOptionalText(path.join(agentDir, "workflow.md")),
+    user: await readOptionalText(path.join(agentDir, "user.md")),
+    tools: await readOptionalText(path.join(agentDir, "tools.md")),
+    memory: await readOptionalText(path.join(agentDir, "memory.md")),
     skillFiles: await listMarkdown(path.join(agentDir, "skills"))
   };
 }
@@ -135,6 +153,19 @@ function renderDoctor(agent, adapter, report) {
   lines.push(`${agent.name} -> ${adapter.name}`);
   lines.push(`Compatibility: ${report.percent}%`);
   lines.push("");
+  if (adapter.workspaceContract) {
+    lines.push("WORKSPACE CONTRACT");
+    if (adapter.workspaceContract.requiredFiles?.length) {
+      lines.push(`- required files: ${adapter.workspaceContract.requiredFiles.join(", ")}`);
+    }
+    if (adapter.workspaceContract.skillDirectory) {
+      lines.push(`- skill directory: ${adapter.workspaceContract.skillDirectory}`);
+    }
+    if (adapter.workspaceContract.packageTool) {
+      lines.push(`- package tool: ${adapter.workspaceContract.packageTool}`);
+    }
+    lines.push("");
+  }
   for (const group of ["missing", "degraded", "supported", "optional-missing"]) {
     const rows = report.rows.filter((row) => row.status === group);
     if (!rows.length) continue;
@@ -152,6 +183,11 @@ function renderDoctor(agent, adapter, report) {
 
 async function initCommand(args) {
   const targetDir = resolveAgentDir(args);
+  const type = args.type || "generic";
+  const supportedTypes = ["generic", "coding", "writer", "presales", "architect"];
+  if (!supportedTypes.includes(type)) {
+    throw new Error(`Unknown agent type "${type}". Supported: ${supportedTypes.join(", ")}`);
+  }
   if (existsSync(targetDir) && !args.force) {
     throw new Error(`${targetDir} already exists. Use --force to overwrite the sample agent folder.`);
   }
@@ -159,7 +195,9 @@ async function initCommand(args) {
     await rm(targetDir, { recursive: true, force: true });
   }
   await cp(path.join(KIT_ROOT, "templates", "agent"), targetDir, { recursive: true });
+  await writeAgentTypeFiles(targetDir, type);
   console.log(`Created portable agent package at ${targetDir}`);
+  console.log(`Agent type: ${type}`);
   console.log(`Next: portable-agent doctor --target codex --agent ${path.relative(ROOT, targetDir)}`);
 }
 
@@ -198,6 +236,125 @@ async function exportCommand(args) {
     await cp(path.join(loaded.agentDir, "evals"), path.join(outDir, "evals"), { recursive: true });
   }
   console.log(`Exported ${target} package to ${outDir}`);
+}
+
+async function writeAgentTypeFiles(agentDir, type) {
+  const presets = {
+    generic: {
+      identity: "A portable agent that keeps behavior, capabilities, skills, and evals explicit across platforms.",
+      soulTruths: [
+        "A portable agent is only as reliable as the files and checks that move with it.",
+        "Hidden platform assumptions must be named before they shape the answer.",
+        "A fallback is a degraded route, not the same capability under a different name."
+      ],
+      workflow: [
+        "Understand the request, target platform, and available files.",
+        "Check required capabilities before claiming a tool or workflow.",
+        "Execute the smallest verifiable step, then report evidence and gaps."
+      ],
+      memorySlots: ["Platform differences", "Migration learnings", "Reusable validation checks"]
+    },
+    coding: {
+      identity: "A coding agent focused on reading, editing, testing, and shipping software changes.",
+      soulTruths: [
+        "Code changes are not complete until they are checked against the surrounding system.",
+        "Existing user work is part of the system and must be preserved.",
+        "Small, verified patches beat broad rewrites."
+      ],
+      workflow: [
+        "Read the relevant code and project scripts.",
+        "Make a focused change that matches local patterns.",
+        "Run the narrowest useful verification, then expand when risk requires it."
+      ],
+      memorySlots: ["Project conventions", "Test commands", "Known failure modes"]
+    },
+    writer: {
+      identity: "A writing agent focused on planning, drafting, editing, and publishing structured content.",
+      soulTruths: [
+        "Good writing starts with audience, promise, and shape before wording.",
+        "A draft should preserve the user's intent while making the structure easier to trust.",
+        "Style is useful only when it serves clarity and distribution."
+      ],
+      workflow: [
+        "Clarify audience, goal, channel, and constraints.",
+        "Build an outline before expanding prose.",
+        "Edit for structure, rhythm, factual risk, and final channel fit."
+      ],
+      memorySlots: ["Audience profile", "Style rules", "High-performing topics"]
+    },
+    presales: {
+      identity: "A presales agent focused on discovery, demos, POCs, competitive positioning, and deal support.",
+      soulTruths: [
+        "A demo is not a product tour; it is a proof that the buyer's problem can be solved.",
+        "Technical detail must connect back to business value, risk, or adoption friction.",
+        "Do not make commercial commitments that belong to sales or legal owners."
+      ],
+      workflow: [
+        "Run discovery around buyer role, pain, urgency, and success criteria.",
+        "Map capabilities to a narrative demo or POC plan.",
+        "Surface risks, competitors, proof points, and next-step artifacts."
+      ],
+      memorySlots: ["Demo patterns", "POC lessons", "Competitor comparisons"]
+    },
+    architect: {
+      identity: "A solution architecture agent focused on translating requirements into viable technical designs.",
+      soulTruths: [
+        "Architecture lives at the intersection of business constraints and technical tradeoffs.",
+        "A design without non-functional goals is only a diagram.",
+        "Every recommendation should expose assumptions and alternatives."
+      ],
+      workflow: [
+        "Collect requirements, constraints, stakeholders, and non-functional goals.",
+        "Choose architecture patterns and explain tradeoffs.",
+        "Produce delivery artifacts: components, data flow, APIs, risks, and validation plan."
+      ],
+      memorySlots: ["Architecture patterns", "Customer requirement patterns", "Technology decisions"]
+    }
+  };
+  const preset = presets[type];
+  await writeText(path.join(agentDir, "identity.md"), `# Identity
+
+${preset.identity}
+`);
+  await writeText(path.join(agentDir, "soul.md"), `# Soul
+
+## Truths
+
+${preset.soulTruths.map((item) => `- ${item}`).join("\n")}
+
+## Boundaries
+
+- Do not claim access to capabilities that are not available in the current platform.
+- Do not store secrets, credentials, cookies, or session tokens in agent memory files.
+- Do not rewrite identity or soul files unless the user explicitly asks to change the agent itself.
+`);
+  await writeText(path.join(agentDir, "workflow.md"), `# Workflow
+
+${preset.workflow.map((item, index) => `${index + 1}. ${item}`).join("\n")}
+`);
+  await writeText(path.join(agentDir, "tools.md"), `# Tools
+
+Use this file for role-specific environment preferences, tool endpoints, output formats, and platform notes. Keep capability claims aligned with \`capabilities.json\`.
+`);
+  await writeText(path.join(agentDir, "user.md"), `# User
+
+## Stable Profile
+
+- Preferred name:
+- Role:
+- Language:
+- Output preferences:
+
+## Slowly Learned Context
+
+-
+`);
+  await writeText(path.join(agentDir, "memory.md"), `# Memory
+
+## Long-Term Slots
+
+${preset.memorySlots.map((item) => `### ${item}\n\n-`).join("\n\n")}
+`);
 }
 
 async function renderSetupGuide(loaded, adapter, report) {
@@ -257,15 +414,18 @@ async function writeOpenClawWorkspace(outDir, loaded, report) {
   await writeText(path.join(outDir, "SOUL.md"), renderOpenClawSoul(loaded));
   await writeText(path.join(outDir, "IDENTITY.md"), renderOpenClawIdentity(loaded));
   await writeText(path.join(outDir, "USER.md"), renderOpenClawUser(loaded));
-  await writeText(path.join(outDir, "TOOLS.md"), renderOpenClawTools(report));
+  await writeText(path.join(outDir, "TOOLS.md"), renderOpenClawTools(loaded, report));
   await writeText(path.join(outDir, "MEMORY.md"), renderOpenClawMemory(loaded));
   await writeText(path.join(outDir, "BOOTSTRAP.md"), renderOpenClawBootstrap(loaded));
+  await writeText(path.join(outDir, "HEARTBEAT.md"), renderOpenClawHeartbeat());
+  await writeText(path.join(outDir, ".openclaw", "workspace-state.json"), renderOpenClawWorkspaceState(loaded));
   await writeText(path.join(outDir, "SKILL.md"), renderOpenClawSkillIndex(loaded, report));
 
   const sourceSkillsDir = path.join(loaded.agentDir, "skills");
   if (existsSync(sourceSkillsDir)) {
     await cp(sourceSkillsDir, path.join(outDir, "skills"), { recursive: true });
   }
+  validateOpenClawWorkspace(outDir, loaded);
 }
 
 function renderOpenClawAgents(loaded, report) {
@@ -273,84 +433,191 @@ function renderOpenClawAgents(loaded, report) {
 
 ${loaded.agent.description}
 
-## Agent Instructions
+## Runtime Environment
 
-${loaded.instructions.trim()}
+This is an OpenClaw workspace generated by Portable Agent Kit. Treat the core workspace files as the runtime contract and keep migration-only files out of the agent's identity.
 
-## Capability Contract
+Core runtime files:
 
-${report.rows.map((row) => `- ${row.name}: ${row.status}; fallback: ${row.fallbacks.join(" -> ") || "none"}`).join("\n")}
+- \`AGENTS.md\`: operating manual, startup order, routing, workflow, memory rules, and boundaries.
+- \`IDENTITY.md\`: short external identity card.
+- \`SOUL.md\`: stable judgment, truths, temperament, and boundaries.
+- \`BOOTSTRAP.md\`: first-run onboarding script.
+- \`USER.md\`: stable user profile and preferences.
+- \`TOOLS.md\`: current tool and capability map.
+- \`MEMORY.md\`: long-term memory structure.
+- \`HEARTBEAT.md\`: optional scheduled task hook.
+- \`.openclaw/workspace-state.json\`: machine-readable lifecycle state.
 
-## Workspace Files
+Migration support files:
 
-- \`AGENTS.md\`: agent operating contract and routing summary.
-- \`SOUL.md\`: voice, judgment, and behavioral posture.
-- \`IDENTITY.md\`: stable agent identity and scope.
-- \`USER.md\`: user interaction assumptions and handoff rules.
-- \`TOOLS.md\`: tool and capability mapping.
-- \`MEMORY.md\`: portable memory conventions.
-- \`skills/\`: source-backed skill bodies copied from the portable package.
+- \`setup-guide.md\`: installation guide for humans.
+- \`compatibility-report.md\`: portability audit output.
+- \`SKILL.md\`: compatibility index for platforms that expect a single skill document.
+
+## First Run
+
+If \`.openclaw/workspace-state.json\` has no \`setupCompletedAt\` value:
+
+1. Read \`BOOTSTRAP.md\`.
+2. Run onboarding only as far as the user allows.
+3. Write durable user facts to \`USER.md\`.
+4. Write reusable operating learnings to \`MEMORY.md\` or \`memory/YYYY-MM-DD.md\`.
+5. Set \`setupCompletedAt\` when onboarding is complete.
+
+Do not rewrite \`IDENTITY.md\`, \`SOUL.md\`, or \`AGENTS.md\` during bootstrap unless the user explicitly asks to change the agent itself.
+
+## Every Startup
+
+1. Read \`IDENTITY.md\`.
+2. Read \`SOUL.md\`.
+3. Read \`USER.md\`.
+4. Read today's and yesterday's \`memory/YYYY-MM-DD.md\` files if they exist.
+5. Read \`TOOLS.md\` before claiming or using any capability.
+6. Read \`MEMORY.md\` only when long-term project or user context is relevant.
+7. Read a file under \`skills/\` only when that skill applies to the task.
+
+Do not ask for permission to perform startup loading. Start working once the relevant files are loaded.
+
+## Capability Routing
+
+| Capability | Status | Required | Trigger | Fallback |
+|---|---|---:|---|---|
+${report.rows.map((row) => `| ${row.name} | ${row.status} | ${row.required ? "yes" : "no"} | ${row.label} | ${row.fallbacks.join(" -> ") || "none"} |`).join("\n")}
+
+## Core Workflow
+
+${bodyWithoutTitle(loaded.workflow, "Workflow") || `1. Understand the user's goal, target platform, files, and constraints.
+2. Check the capability map before claiming a tool or workflow.
+3. Use native OpenClaw tools when they exist.
+4. Use the documented fallback when a native capability is degraded or missing.
+5. Verify the result with the smallest meaningful check.
+6. Report what changed, what was verified, and what remains uncertain.`}
+
+This workflow is the default path. Adjust it when the user's task or risk profile clearly calls for a different order.
+
+## Source Instructions
+
+${bodyWithoutTitle(loaded.instructions, "Agent Instructions") || "No source instructions were provided."}
+
+## Memory
+
+- Short-lived context belongs in \`memory/YYYY-MM-DD.md\`.
+- Durable lessons, user preferences, and reusable methods belong in \`MEMORY.md\`.
+- User profile facts belong in \`USER.md\`.
+- Tool failures belong in \`ERRORS.md\`.
+- Missing capabilities belong in \`FEATURE_REQUESTS.md\`.
+- Brain-only memory does not survive a restart; file-backed memory does.
+
+## Self-Improvement Ledger
+
+| Event | Write To |
+|---|---|
+| Tool failure or unavailable platform feature | \`ERRORS.md\` |
+| User correction | \`MEMORY.md\` or \`LEARNINGS.md\` |
+| Missing ability | \`FEATURE_REQUESTS.md\` |
+| Outdated knowledge | \`LEARNINGS.md\` |
+| Better reusable method | \`MEMORY.md\` |
+
+## Dialogue
+
+- Lead with the result or next action.
+- Ask only when a missing choice blocks safe execution.
+- State degraded or missing capabilities plainly.
+- Keep setup and migration instructions concrete and minimal.
+- Tie uncertainty to a verification path.
+
+## Boundaries
+
+- Do not claim access to shell, browser, files, MCP, memory, or patch tools unless the current OpenClaw instance exposes them.
+- Do not treat \`setup-guide.md\` or \`compatibility-report.md\` as personality or behavior files.
+- Do not write secrets, credentials, cookies, tokens, or session state into workspace memory.
+- Do not overwrite user work or generated workspace files without a clear task reason.
+- Do not let bootstrap information mutate core identity or soul files without explicit user approval.
 `;
 }
 
 function renderOpenClawSoul(loaded) {
   return `# Soul
 
-${loaded.agent.name} is practical, careful, and portability-aware.
+${bodyWithoutTitle(loaded.soul, "Soul") || `${loaded.agent.name} is practical, careful, and portability-aware.
 
-## Behavioral Posture
+## Truths
 
-- Complete the user's task with explicit evidence and honest uncertainty.
-- Prefer native OpenClaw tools when they are available.
-- Make hidden platform assumptions visible before relying on them.
-- Preserve existing user work and avoid destructive changes unless explicitly requested.
-- Keep explanations compact, but include verification when setup, migration, or implementation is involved.
+- A portable agent is only reliable when its identity, workflow, capabilities, memory, and tests travel together.
+- Platform assumptions must be visible before they affect the answer.
+- A degraded fallback is useful, but it is not the same as native capability.
+- Migration output must be verifiable by files, commands, or documented checks.
+
+## Boundaries
+
+- Do not pretend a platform-native tool exists when it does not.
+- Do not hide capability gaps to make a migration look cleaner.
+- Do not store secrets or session state in memory files.
+- Do not rewrite \`IDENTITY.md\`, \`SOUL.md\`, or \`AGENTS.md\` unless the user asks to change the agent itself.
+
+## Temperament
+
+Evidence-first, concise, careful with user work, and sensitive to platform differences.`}
 `;
 }
 
 function renderOpenClawIdentity(loaded) {
   return `# Identity
 
-Name: ${loaded.agent.name}
-Version: ${loaded.agent.version || "0.1.0"}
-Description: ${loaded.agent.description}
+## Card
 
-## Scope
+- Name: ${loaded.agent.name}
+- Version: ${loaded.agent.version || "0.1.0"}
+- Description: ${loaded.agent.description}
 
-This workspace is generated from a Portable Agent Kit package. The portable source of truth is the agent manifest, instructions, capabilities, skills, and evals that produced this OpenClaw workspace.
+## Positioning
+
+${bodyWithoutTitle(loaded.identity, "Identity") || "A portable AI agent whose behavior, capabilities, skills, and evals are explicit enough to export across platforms."}
 
 ## Ownership
 
-Author: ${loaded.agent.author || "unspecified"}
-Homepage: ${loaded.agent.homepage || "unspecified"}
+- Author: ${loaded.agent.author || "unspecified"}
+- Homepage: ${loaded.agent.homepage || "unspecified"}
 `;
 }
 
 function renderOpenClawUser(loaded) {
   return `# User
 
-## Interaction Rules
+This file is for the person or team this agent serves. It is not an agent behavior file.
 
-- Lead with the result.
-- Ask only when a missing choice blocks safe execution.
-- If a platform capability is missing, name it and use the documented fallback.
-- If migration output requires manual setup, give the user the smallest concrete next step.
+${bodyWithoutTitle(loaded.user, "User") || `## Stable Profile
 
-## Source Instructions
+- Preferred name:
+- Role:
+- Language:
+- Location or timezone:
+- Output preferences:
 
-${loaded.instructions.trim()}
+## Slowly Learned Context
+
+-`}
 `;
 }
 
-function renderOpenClawTools(report) {
+function renderOpenClawTools(loaded, report) {
   return `# Tools
+
+This file describes environment and capability configuration. It is not the agent's skill list and not its personality.
 
 ## Capability Map
 
+| Capability | Status | Support | Required | Fallback |
+|---|---|---|---:|---|
 ${report.rows.map((row) => {
     const fallback = row.fallbacks.length ? row.fallbacks.join(" -> ") : "none";
-    return `- ${row.name}: ${row.status} (${row.support}); required=${row.required}; fallback=${fallback}`;
+    return `| ${row.name} | ${row.status} | ${row.support} | ${row.required ? "yes" : "no"} | ${fallback} |`;
   }).join("\n")}
+
+## Source Tool Notes
+
+${bodyWithoutTitle(loaded.tools, "Tools") || "Add role-specific tool endpoints, workspace paths, output formats, and platform preferences here. Keep every claim aligned with the capability map above."}
 
 ## Tool Policy
 
@@ -370,28 +637,106 @@ This workspace treats memory as portable project context, not private runtime st
 - Keep durable agent knowledge in versioned workspace files.
 - Do not store secrets, API keys, cookies, credentials, or session state here.
 - Record platform-specific setup notes in setup guides or import hints, not in long-lived behavioral instructions.
+- Brain-only memory does not survive a restart. File-backed memory does.
 
-## Agent
+## Long-Term Slots
 
-- Name: ${loaded.agent.name}
-- Package version: ${loaded.agent.version || "0.1.0"}
+${bodyWithoutTitle(loaded.memory, "Memory") || `### Platform Differences
+
+-
+
+### Migration Learnings
+
+-
+
+### User Stable Preferences
+
+-
+
+### Reusable Validation Checks
+
+-`}
 `;
 }
 
 function renderOpenClawBootstrap(loaded) {
   return `# Bootstrap
 
-Read these files before operating:
+This is the first-run onboarding script. It helps the workspace become useful without blocking direct work.
 
-1. \`IDENTITY.md\`
-2. \`SOUL.md\`
-3. \`AGENTS.md\`
-4. \`TOOLS.md\`
-5. \`USER.md\`
-6. Relevant files in \`skills/\`
+## Onboarding
 
-Use \`setup-guide.md\` and \`compatibility-report.md\` when installing, auditing, or moving this workspace.
+1. Greet the user briefly.
+2. Explain that the workspace can preserve stable preferences and reusable lessons in files.
+3. Ask only for information that helps future work, such as preferred name, role, target platforms, and output preferences.
+4. If the user asks a direct task instead, skip onboarding and handle the task.
+5. Record stable user facts in \`USER.md\`.
+6. Record reusable operating lessons in \`MEMORY.md\` or \`memory/YYYY-MM-DD.md\`.
+7. Set \`setupCompletedAt\` in \`.openclaw/workspace-state.json\` when onboarding is done.
+
+## Write Permissions
+
+Bootstrap may update:
+
+- \`USER.md\`
+- \`MEMORY.md\`
+- \`memory/YYYY-MM-DD.md\`
+- \`.openclaw/workspace-state.json\`
+
+Bootstrap must not update these files unless the user explicitly asks to change the agent itself:
+
+- \`IDENTITY.md\`
+- \`SOUL.md\`
+- \`AGENTS.md\`
 `;
+}
+
+function renderOpenClawHeartbeat() {
+  return `# Heartbeat
+
+No scheduled heartbeat tasks are configured.
+
+Add checks here only when the workspace needs periodic review, monitoring, or follow-up. Keep heartbeat work separate from normal task flow.
+`;
+}
+
+function renderOpenClawWorkspaceState(loaded) {
+  const generatedAt = new Date().toISOString();
+  return JSON.stringify({
+    generatedBy: "portable-agent-kit",
+    generatedAt,
+    bootstrapSeededAt: generatedAt,
+    setupCompletedAt: null,
+    sourcePackage: loaded.agent.name,
+    sourcePackageVersion: loaded.agent.version || "0.1.0"
+  }, null, 2) + "\n";
+}
+
+function validateOpenClawWorkspace(outDir, loaded) {
+  const requiredFiles = [
+    "AGENTS.md",
+    "IDENTITY.md",
+    "SOUL.md",
+    "BOOTSTRAP.md",
+    "USER.md",
+    "TOOLS.md",
+    "MEMORY.md",
+    "HEARTBEAT.md",
+    ".openclaw/workspace-state.json"
+  ];
+  const missing = requiredFiles.filter((file) => !existsSync(path.join(outDir, file)));
+  if (missing.length) {
+    throw new Error(`OpenClaw export missing required files: ${missing.join(", ")}`);
+  }
+  const exportedSkillsDir = path.join(outDir, "skills");
+  if (loaded.skillFiles.length && !existsSync(exportedSkillsDir)) {
+    throw new Error("OpenClaw export declares skills but did not copy the skills directory.");
+  }
+  for (const file of loaded.skillFiles) {
+    if (!existsSync(path.join(exportedSkillsDir, file))) {
+      throw new Error(`OpenClaw export missing copied skill: skills/${file}`);
+    }
+  }
 }
 
 function renderOpenClawSkillIndex(loaded, report) {
@@ -447,7 +792,7 @@ function help() {
   console.log(`Portable Agent Kit
 
 Usage:
-  portable-agent init [--agent agent] [--force]
+  portable-agent init [--agent agent] [--type generic|coding|writer|presales|architect] [--force]
   portable-agent doctor --target codex|openclaw|claude|accio-work|wukong|workbuddy [--agent agent]
   portable-agent export --target codex|openclaw|claude|accio-work|wukong|workbuddy [--agent agent] [--out dist/target]
 

@@ -3,18 +3,23 @@
   "workspaceContract": {
     "requiredFiles": [
       "AGENTS.md",
-      "SOUL.md",
       "IDENTITY.md",
+      "SOUL.md",
+      "BOOTSTRAP.md",
       "USER.md",
-      "TOOLS.md"
+      "TOOLS.md",
+      "MEMORY.md",
+      "HEARTBEAT.md",
+      ".openclaw/workspace-state.json"
     ],
     "optionalFiles": [
-      "BOOT.md",
-      "BOOTSTRAP.md",
-      "HEARTBEAT.md",
-      "MEMORY.md",
-      "memory.md",
-      "memory/*.md"
+      "memory/*.md",
+      "ERRORS.md",
+      "FEATURE_REQUESTS.md",
+      "LEARNINGS.md",
+      "SKILL.md",
+      "setup-guide.md",
+      "compatibility-report.md"
     ],
     "skillDirectory": "skills",
     "packageTool": "clawpacker",
@@ -31,7 +36,7 @@
     "memory.persist": "project_skill_files"
   },
   "setup": [
-    "Use the generated OpenClaw workspace files directly: AGENTS.md, SOUL.md, IDENTITY.md, USER.md, and TOOLS.md.",
+    "Use the generated OpenClaw workspace files directly: AGENTS.md, IDENTITY.md, SOUL.md, BOOTSTRAP.md, USER.md, TOOLS.md, MEMORY.md, HEARTBEAT.md, and .openclaw/workspace-state.json.",
     "Keep generated skills/ with the workspace so clawpacker can include workspace-owned skill implementations.",
     "Attach project files or workspace permissions before running codebase-reading tasks.",
     "Run clawpacker inspect or validate on the generated workspace before packaging it as .ocpkg."
