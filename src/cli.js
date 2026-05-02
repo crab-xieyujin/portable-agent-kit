@@ -3,12 +3,22 @@ import { mkdir, readFile, writeFile, readdir, cp, rm } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import path from "node:path";
 import process from "node:process";
+import { createInterface } from "node:readline/promises";
 import { fileURLToPath } from "node:url";
 
 const ROOT = process.cwd();
 const KIT_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 const TARGETS = ["codex", "openclaw", "claude", "accio-work", "wukong", "workbuddy"];
+
+const TARGET_GUIDANCE = {
+  codex: "Codex project instructions with AGENTS.md",
+  openclaw: "OpenClaw workspace package with identity, soul, memory, bootstrap, and state files",
+  claude: "Claude-family project instructions with CLAUDE.md",
+  "accio-work": "Accio Work manual setup guide and skill cards",
+  wukong: "Wukong manual setup guide and skill cards",
+  workbuddy: "WorkBuddy manual setup guide and skill cards"
+};
 
 const CAPABILITY_LABELS = {
   "filesystem.read": "Read files from a workspace or uploaded documents",
@@ -110,6 +120,40 @@ async function loadAdapter(target) {
   return readJson(path.join(KIT_ROOT, "adapters", target, "adapter.json"));
 }
 
+function renderTargetOptions() {
+  return TARGETS.map((target, index) => {
+    return `${index + 1}. ${target} - ${TARGET_GUIDANCE[target]}`;
+  }).join("\n");
+}
+
+async function resolveTarget(args, command) {
+  if (args.target) return args.target;
+  const agentHint = args.agent ? ` --agent ${args.agent}` : "";
+  if (!process.stdin.isTTY || !process.stdout.isTTY) {
+    throw new Error(
+      `Missing --target for ${command}. Choose one: ${TARGETS.join(", ")}.\n` +
+      `Example: portable-agent ${command} --target openclaw${agentHint}`
+    );
+  }
+
+  console.log(`Which platform should this agent be adapted for?\n`);
+  console.log(renderTargetOptions());
+  const rl = createInterface({ input: process.stdin, output: process.stdout });
+  try {
+    const answer = (await rl.question("\nEnter a number or target name: ")).trim().toLowerCase();
+    const numeric = Number(answer);
+    const target = Number.isInteger(numeric) && numeric >= 1 && numeric <= TARGETS.length
+      ? TARGETS[numeric - 1]
+      : TARGETS.find((item) => item === answer);
+    if (!target) {
+      throw new Error(`Unknown target "${answer}". Supported: ${TARGETS.join(", ")}`);
+    }
+    return target;
+  } finally {
+    rl.close();
+  }
+}
+
 function scoreSupport(value) {
   if (!value || value === "none" || value === "unknown") return 0;
   if (
@@ -198,11 +242,15 @@ async function initCommand(args) {
   await writeAgentTypeFiles(targetDir, type);
   console.log(`Created portable agent package at ${targetDir}`);
   console.log(`Agent type: ${type}`);
-  console.log(`Next: portable-agent doctor --target codex --agent ${path.relative(ROOT, targetDir)}`);
+  console.log("");
+  console.log("Next: choose the platform you want to adapt this agent for:");
+  console.log(renderTargetOptions());
+  console.log("");
+  console.log(`Run: portable-agent doctor --target <platform> --agent ${path.relative(ROOT, targetDir)}`);
 }
 
 async function doctorCommand(args) {
-  const target = args.target || "codex";
+  const target = await resolveTarget(args, "doctor");
   const loaded = await loadAgent(resolveAgentDir(args));
   const adapter = await loadAdapter(target);
   const report = analyzeCompatibility(loaded.capabilities, adapter);
@@ -210,7 +258,7 @@ async function doctorCommand(args) {
 }
 
 async function exportCommand(args) {
-  const target = args.target || "codex";
+  const target = await resolveTarget(args, "export");
   const loaded = await loadAgent(resolveAgentDir(args));
   const adapter = await loadAdapter(target);
   const report = analyzeCompatibility(loaded.capabilities, adapter);
