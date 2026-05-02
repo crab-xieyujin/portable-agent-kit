@@ -68,6 +68,7 @@ agent/
 Check compatibility with a target platform:
 
 ```bash
+portable-agent doctor
 portable-agent doctor --target codex
 portable-agent doctor --target openclaw
 portable-agent doctor --target claude
@@ -79,6 +80,7 @@ portable-agent doctor --target workbuddy
 Export a platform-specific package:
 
 ```bash
+portable-agent export
 portable-agent export --target codex
 portable-agent export --target openclaw
 portable-agent export --target claude
@@ -92,6 +94,8 @@ Generated files are written to:
 ```txt
 dist/<target>/
 ```
+
+If `--target` is omitted in an interactive terminal, the CLI shows a platform picker. Use Up/Down arrows and press Enter to confirm. In non-interactive scripts or CI, pass `--target` explicitly; the CLI prints the same choices and an example command instead of waiting for keyboard input.
 
 ### How Others Use Your Agent
 
@@ -184,6 +188,7 @@ portable-agent init --agent my-agent --force
 Check whether a target platform can support the agent.
 
 ```bash
+portable-agent doctor
 portable-agent doctor --target codex
 portable-agent doctor --target openclaw
 portable-agent doctor --target claude
@@ -197,6 +202,7 @@ portable-agent doctor --target workbuddy
 Generate platform-specific setup files.
 
 ```bash
+portable-agent export
 portable-agent export --target codex
 portable-agent export --target openclaw
 portable-agent export --target claude
@@ -371,6 +377,7 @@ agent/
 检查目标平台兼容性：
 
 ```bash
+portable-agent doctor
 portable-agent doctor --target codex
 portable-agent doctor --target openclaw
 portable-agent doctor --target claude
@@ -382,6 +389,7 @@ portable-agent doctor --target workbuddy
 导出目标平台配置包：
 
 ```bash
+portable-agent export
 portable-agent export --target codex
 portable-agent export --target openclaw
 portable-agent export --target accio-work
@@ -394,6 +402,8 @@ portable-agent export --target workbuddy
 ```txt
 dist/<target>/
 ```
+
+如果在交互式终端里省略 `--target`，CLI 会显示平台选择器，可以用上下键选择并按 Enter 确认；如果在脚本或 CI 里运行，请显式传入 `--target`，CLI 会打印同一组选项和示例命令，不会等待键盘输入。
 
 ### 别人如何使用你的 Agent
 
@@ -484,6 +494,7 @@ portable-agent init --agent my-agent --force
 检查目标平台是否能支持这个 Agent。
 
 ```bash
+portable-agent doctor
 portable-agent doctor --target codex
 portable-agent doctor --target openclaw
 portable-agent doctor --target accio-work
@@ -496,6 +507,7 @@ portable-agent doctor --target workbuddy
 生成目标平台专用配置文件。
 
 ```bash
+portable-agent export
 portable-agent export --target codex
 portable-agent export --target openclaw
 portable-agent export --target claude

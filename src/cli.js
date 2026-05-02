@@ -3,12 +3,22 @@ import { mkdir, readFile, writeFile, readdir, cp, rm } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import path from "node:path";
 import process from "node:process";
+import { emitKeypressEvents } from "node:readline";
 import { fileURLToPath } from "node:url";
 
 const ROOT = process.cwd();
 const KIT_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 const TARGETS = ["codex", "openclaw", "claude", "accio-work", "wukong", "workbuddy"];
+
+const TARGET_GUIDANCE = {
+  codex: "Codex project instructions with AGENTS.md",
+  openclaw: "OpenClaw workspace package with identity, soul, memory, bootstrap, and state files",
+  claude: "Claude-family project instructions with CLAUDE.md",
+  "accio-work": "Accio Work manual setup guide and skill cards",
+  wukong: "Wukong manual setup guide and skill cards",
+  workbuddy: "WorkBuddy manual setup guide and skill cards"
+};
 
 const CAPABILITY_LABELS = {
   "filesystem.read": "Read files from a workspace or uploaded documents",
@@ -110,6 +120,97 @@ async function loadAdapter(target) {
   return readJson(path.join(KIT_ROOT, "adapters", target, "adapter.json"));
 }
 
+function renderTargetOptions() {
+  return TARGETS.map((target, index) => {
+    return `${index + 1}. ${target} - ${TARGET_GUIDANCE[target]}`;
+  }).join("\n");
+}
+
+async function selectTargetWithKeyboard() {
+  return new Promise((resolve, reject) => {
+    let selected = 0;
+    let rendered = false;
+    const input = process.stdin;
+    const output = process.stdout;
+    const previousRawMode = input.isRaw;
+
+    function render() {
+      if (rendered) {
+        output.write(`\x1b[${TARGETS.length}A\x1b[0J`);
+      }
+      for (let index = 0; index < TARGETS.length; index += 1) {
+        const target = TARGETS[index];
+        const marker = index === selected ? ">" : " ";
+        output.write(`${marker} ${target} - ${TARGET_GUIDANCE[target]}\n`);
+      }
+      rendered = true;
+    }
+
+    function cleanup() {
+      input.off("keypress", onKeypress);
+      if (input.isTTY && typeof input.setRawMode === "function") {
+        input.setRawMode(previousRawMode);
+      }
+      input.pause();
+      output.write("\x1b[?25h");
+    }
+
+    function onKeypress(_text, key = {}) {
+      if (key.ctrl && key.name === "c") {
+        cleanup();
+        reject(new Error("Target selection cancelled."));
+        return;
+      }
+      if (key.name === "up") {
+        selected = selected === 0 ? TARGETS.length - 1 : selected - 1;
+        render();
+        return;
+      }
+      if (key.name === "down") {
+        selected = selected === TARGETS.length - 1 ? 0 : selected + 1;
+        render();
+        return;
+      }
+      if (key.name === "return" || key.name === "enter") {
+        const target = TARGETS[selected];
+        cleanup();
+        output.write(`Selected: ${target}\n`);
+        resolve(target);
+        return;
+      }
+      const numeric = Number(key.sequence);
+      if (Number.isInteger(numeric) && numeric >= 1 && numeric <= TARGETS.length) {
+        selected = numeric - 1;
+        render();
+      }
+    }
+
+    output.write("Which platform should this agent be adapted for?\n");
+    output.write("Use Up/Down arrows and press Enter to confirm.\n\n");
+    output.write("\x1b[?25l");
+    emitKeypressEvents(input);
+    if (input.isTTY && typeof input.setRawMode === "function") {
+      input.setRawMode(true);
+    }
+    input.resume();
+    input.on("keypress", onKeypress);
+    render();
+  });
+}
+
+async function resolveTarget(args, command) {
+  if (args.target) return args.target;
+  const agentHint = args.agent ? ` --agent ${args.agent}` : "";
+  if (!process.stdin.isTTY || !process.stdout.isTTY) {
+    throw new Error(
+      `Missing --target for ${command}. Choose one:\n${renderTargetOptions()}\n` +
+      `Example: portable-agent ${command} --target openclaw${agentHint}`
+    );
+  }
+
+  return selectTargetWithKeyboard();
+}
+
 function scoreSupport(value) {
   if (!value || value === "none" || value === "unknown") return 0;
   if (
@@ -198,11 +299,15 @@ async function initCommand(args) {
   await writeAgentTypeFiles(targetDir, type);
   console.log(`Created portable agent package at ${targetDir}`);
   console.log(`Agent type: ${type}`);
-  console.log(`Next: portable-agent doctor --target codex --agent ${path.relative(ROOT, targetDir)}`);
+  console.log("");
+  console.log("Next: choose the platform you want to adapt this agent for:");
+  console.log(renderTargetOptions());
+  console.log("");
+  console.log(`Run: portable-agent doctor --target <platform> --agent ${path.relative(ROOT, targetDir)}`);
 }
 
 async function doctorCommand(args) {
-  const target = args.target || "codex";
+  const target = await resolveTarget(args, "doctor");
   const loaded = await loadAgent(resolveAgentDir(args));
   const adapter = await loadAdapter(target);
   const report = analyzeCompatibility(loaded.capabilities, adapter);
@@ -210,7 +315,7 @@ async function doctorCommand(args) {
 }
 
 async function exportCommand(args) {
-  const target = args.target || "codex";
+  const target = await resolveTarget(args, "export");
   const loaded = await loadAgent(resolveAgentDir(args));
   const adapter = await loadAdapter(target);
   const report = analyzeCompatibility(loaded.capabilities, adapter);
