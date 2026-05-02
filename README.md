@@ -326,7 +326,7 @@ These are not meant to replace platform-native tools. They are safety nets for d
 - Wukong
 - WorkBuddy
 
-OpenClaw exports are full workspace-shaped packages. They include `AGENTS.md`, `IDENTITY.md`, `SOUL.md`, `BOOTSTRAP.md`, `USER.md`, `TOOLS.md`, `MEMORY.md`, `HEARTBEAT.md`, `.openclaw/workspace-state.json`, copied `skills/`, `skills/_shared/` resources, setup notes, toolchain migration notes, and a compatibility report. Claude exports include `CLAUDE.md`. Accio Work, Wukong, and WorkBuddy exports are setup guides because public, stable file-import formats are not assumed. If those platforms later expose import APIs or package formats, add new adapter renderers in `src/cli.js`.
+OpenClaw exports are full workspace-shaped packages. They include `AGENTS.md`, `IDENTITY.md`, `SOUL.md`, `BOOTSTRAP.md`, `USER.md`, `TOOLS.md`, `MEMORY.md`, `HEARTBEAT.md`, `.openclaw/workspace-state.json`, copied `skills/`, `skills/_shared/` resources, setup notes, toolchain migration notes, and a compatibility report. OpenClaw runtime files are generated with Chinese operating text by default while preserving paths, capability keys, and user-provided source content. Claude exports include `CLAUDE.md`. Accio Work, Wukong, and WorkBuddy exports are setup guides because public, stable file-import formats are not assumed. If those platforms later expose import APIs or package formats, add new adapter renderers in `src/cli.js`.
 
 ### Roadmap
 
@@ -651,7 +651,7 @@ fallbacks/text_search.py
 - Wukong
 - WorkBuddy
 
-OpenClaw 会导出完整工作区包，包括 `AGENTS.md`、`IDENTITY.md`、`SOUL.md`、`BOOTSTRAP.md`、`USER.md`、`TOOLS.md`、`MEMORY.md`、`HEARTBEAT.md`、`.openclaw/workspace-state.json`、复制后的 `skills/`、`skills/_shared/` 资源、安装说明、工具链迁移说明和兼容性报告。Accio Work、Wukong 和 WorkBuddy 目前导出的是 setup guide，因为这里不假设它们已经有公开稳定的文件导入格式。如果这些平台之后开放导入 API 或 Agent package 格式，可以在 `src/cli.js` 里增加新的 adapter renderer。
+OpenClaw 会导出完整工作区包，包括 `AGENTS.md`、`IDENTITY.md`、`SOUL.md`、`BOOTSTRAP.md`、`USER.md`、`TOOLS.md`、`MEMORY.md`、`HEARTBEAT.md`、`.openclaw/workspace-state.json`、复制后的 `skills/`、`skills/_shared/` 资源、安装说明、工具链迁移说明和兼容性报告。OpenClaw 运行文件默认使用中文操作说明，同时保留路径、能力 key 和用户自定义源内容。Accio Work、Wukong 和 WorkBuddy 目前导出的是 setup guide，因为这里不假设它们已经有公开稳定的文件导入格式。如果这些平台之后开放导入 API 或 Agent package 格式，可以在 `src/cli.js` 里增加新的 adapter renderer。
 
 ### 路线图
 
