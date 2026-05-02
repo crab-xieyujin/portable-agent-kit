@@ -95,7 +95,7 @@ Generated files are written to:
 dist/<target>/
 ```
 
-If `--target` is omitted in an interactive terminal, the CLI asks which platform to adapt the agent for. In non-interactive scripts, pass `--target` explicitly.
+If `--target` is omitted in an interactive terminal, the CLI shows a platform picker. Use Up/Down arrows and press Enter to confirm. In non-interactive scripts or CI, pass `--target` explicitly; the CLI prints the same choices and an example command instead of waiting for keyboard input.
 
 ### How Others Use Your Agent
 
@@ -403,7 +403,7 @@ portable-agent export --target workbuddy
 dist/<target>/
 ```
 
-如果在交互式终端里省略 `--target`，CLI 会先询问要适配哪个平台；如果在脚本或 CI 里运行，请显式传入 `--target`。
+如果在交互式终端里省略 `--target`，CLI 会显示平台选择器，可以用上下键选择并按 Enter 确认；如果在脚本或 CI 里运行，请显式传入 `--target`，CLI 会打印同一组选项和示例命令，不会等待键盘输入。
 
 ### 别人如何使用你的 Agent
 

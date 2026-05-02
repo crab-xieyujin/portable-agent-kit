@@ -3,7 +3,7 @@ import { mkdir, readFile, writeFile, readdir, cp, rm } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import path from "node:path";
 import process from "node:process";
-import { createInterface } from "node:readline/promises";
+import { emitKeypressEvents } from "node:readline";
 import { fileURLToPath } from "node:url";
 
 const ROOT = process.cwd();
@@ -126,32 +126,89 @@ function renderTargetOptions() {
   }).join("\n");
 }
 
+async function selectTargetWithKeyboard() {
+  return new Promise((resolve, reject) => {
+    let selected = 0;
+    let rendered = false;
+    const input = process.stdin;
+    const output = process.stdout;
+    const previousRawMode = input.isRaw;
+
+    function render() {
+      if (rendered) {
+        output.write(`\x1b[${TARGETS.length}A\x1b[0J`);
+      }
+      for (let index = 0; index < TARGETS.length; index += 1) {
+        const target = TARGETS[index];
+        const marker = index === selected ? ">" : " ";
+        output.write(`${marker} ${target} - ${TARGET_GUIDANCE[target]}\n`);
+      }
+      rendered = true;
+    }
+
+    function cleanup() {
+      input.off("keypress", onKeypress);
+      if (input.isTTY && typeof input.setRawMode === "function") {
+        input.setRawMode(previousRawMode);
+      }
+      input.pause();
+      output.write("\x1b[?25h");
+    }
+
+    function onKeypress(_text, key = {}) {
+      if (key.ctrl && key.name === "c") {
+        cleanup();
+        reject(new Error("Target selection cancelled."));
+        return;
+      }
+      if (key.name === "up") {
+        selected = selected === 0 ? TARGETS.length - 1 : selected - 1;
+        render();
+        return;
+      }
+      if (key.name === "down") {
+        selected = selected === TARGETS.length - 1 ? 0 : selected + 1;
+        render();
+        return;
+      }
+      if (key.name === "return" || key.name === "enter") {
+        const target = TARGETS[selected];
+        cleanup();
+        output.write(`Selected: ${target}\n`);
+        resolve(target);
+        return;
+      }
+      const numeric = Number(key.sequence);
+      if (Number.isInteger(numeric) && numeric >= 1 && numeric <= TARGETS.length) {
+        selected = numeric - 1;
+        render();
+      }
+    }
+
+    output.write("Which platform should this agent be adapted for?\n");
+    output.write("Use Up/Down arrows and press Enter to confirm.\n\n");
+    output.write("\x1b[?25l");
+    emitKeypressEvents(input);
+    if (input.isTTY && typeof input.setRawMode === "function") {
+      input.setRawMode(true);
+    }
+    input.resume();
+    input.on("keypress", onKeypress);
+    render();
+  });
+}
+
 async function resolveTarget(args, command) {
   if (args.target) return args.target;
   const agentHint = args.agent ? ` --agent ${args.agent}` : "";
   if (!process.stdin.isTTY || !process.stdout.isTTY) {
     throw new Error(
-      `Missing --target for ${command}. Choose one: ${TARGETS.join(", ")}.\n` +
+      `Missing --target for ${command}. Choose one:\n${renderTargetOptions()}\n` +
       `Example: portable-agent ${command} --target openclaw${agentHint}`
     );
   }
 
-  console.log(`Which platform should this agent be adapted for?\n`);
-  console.log(renderTargetOptions());
-  const rl = createInterface({ input: process.stdin, output: process.stdout });
-  try {
-    const answer = (await rl.question("\nEnter a number or target name: ")).trim().toLowerCase();
-    const numeric = Number(answer);
-    const target = Number.isInteger(numeric) && numeric >= 1 && numeric <= TARGETS.length
-      ? TARGETS[numeric - 1]
-      : TARGETS.find((item) => item === answer);
-    if (!target) {
-      throw new Error(`Unknown target "${answer}". Supported: ${TARGETS.join(", ")}`);
-    }
-    return target;
-  } finally {
-    rl.close();
-  }
+  return selectTargetWithKeyboard();
 }
 
 function scoreSupport(value) {
