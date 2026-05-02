@@ -56,6 +56,10 @@ async function readJson(file) {
   return JSON.parse(await readFile(file, "utf8"));
 }
 
+async function readOptionalJson(file, fallback) {
+  return existsSync(file) ? readJson(file) : fallback;
+}
+
 async function readText(file) {
   return readFile(file, "utf8");
 }
@@ -75,6 +79,21 @@ async function listMarkdown(dir) {
   return names.filter((name) => name.endsWith(".md")).sort();
 }
 
+async function listFilesRecursive(dir) {
+  if (!existsSync(dir)) return [];
+  const entries = await readdir(dir, { withFileTypes: true });
+  const files = [];
+  for (const entry of entries) {
+    const fullPath = path.join(dir, entry.name);
+    if (entry.isDirectory()) {
+      files.push(...await listFilesRecursive(fullPath));
+    } else if (entry.isFile()) {
+      files.push(fullPath);
+    }
+  }
+  return files.sort();
+}
+
 function bodyWithoutTitle(markdown, title) {
   const trimmed = markdown.trim();
   if (!trimmed) return "";
@@ -83,6 +102,46 @@ function bodyWithoutTitle(markdown, title) {
     return lines.slice(1).join("\n").trim();
   }
   return trimmed;
+}
+
+function normalizeRelativePath(value) {
+  return String(value).replace(/\\/g, "/").replace(/\/$/, "");
+}
+
+function getToolchainTools(toolchain) {
+  return toolchain.tools || toolchain.toolchain || {};
+}
+
+function collectToolchainPaths(toolchain, key) {
+  const paths = new Set();
+  for (const spec of Object.values(getToolchainTools(toolchain))) {
+    for (const item of spec[key] || []) {
+      const normalized = normalizeRelativePath(item);
+      if (normalized.includes("*")) continue;
+      paths.add(normalized);
+    }
+  }
+  return [...paths].sort();
+}
+
+function validateToolchainReferences(loaded) {
+  const missing = [];
+  for (const item of collectToolchainPaths(loaded.toolchain, "assets")) {
+    if (!existsSync(path.join(loaded.agentDir, item))) missing.push(item);
+  }
+  for (const item of collectToolchainPaths(loaded.toolchain, "fallbacks")) {
+    if (!existsSync(path.join(loaded.agentDir, item))) missing.push(item);
+  }
+  if (missing.length) {
+    throw new Error(`toolchain.json references missing files or directories: ${missing.join(", ")}`);
+  }
+}
+
+function mapSharedAssetTarget(relativePath) {
+  const normalized = normalizeRelativePath(relativePath);
+  if (normalized.startsWith("assets/")) return normalized.slice("assets/".length);
+  if (normalized.startsWith("fallbacks/")) return normalized;
+  return normalized;
 }
 
 function resolveAgentDir(args) {
@@ -98,10 +157,13 @@ async function loadAgent(agentDir) {
   if (!existsSync(capabilitiesFile)) {
     throw new Error(`Missing ${capabilitiesFile}.`);
   }
-  return {
+  const assetsDir = path.join(agentDir, "assets");
+  const fallbacksDir = path.join(agentDir, "fallbacks");
+  const loaded = {
     agentDir,
     agent: await readJson(agentFile),
     capabilities: await readJson(capabilitiesFile),
+    toolchain: await readOptionalJson(path.join(agentDir, "toolchain.json"), { tools: {} }),
     identity: await readOptionalText(path.join(agentDir, "identity.md")),
     soul: await readOptionalText(path.join(agentDir, "soul.md")),
     instructions: await readOptionalText(path.join(agentDir, "instructions.md")),
@@ -109,8 +171,14 @@ async function loadAgent(agentDir) {
     user: await readOptionalText(path.join(agentDir, "user.md")),
     tools: await readOptionalText(path.join(agentDir, "tools.md")),
     memory: await readOptionalText(path.join(agentDir, "memory.md")),
-    skillFiles: await listMarkdown(path.join(agentDir, "skills"))
+    skillFiles: await listMarkdown(path.join(agentDir, "skills")),
+    assetsDir,
+    fallbacksDir,
+    assetFiles: await listFilesRecursive(assetsDir),
+    fallbackFiles: await listFilesRecursive(fallbacksDir)
   };
+  validateToolchainReferences(loaded);
+  return loaded;
 }
 
 async function loadAdapter(target) {
@@ -336,11 +404,46 @@ async function exportCommand(args) {
     await writeText(path.join(outDir, "skill-cards.md"), await renderSkillCards(loaded));
   }
 
+  if (target !== "openclaw") {
+    await copySourceSkills(outDir, loaded);
+  }
+  await writeSharedToolchain(outDir, loaded, adapter, report);
   await writeText(path.join(outDir, "compatibility-report.md"), renderDoctor(loaded.agent, adapter, report) + "\n");
   if (existsSync(path.join(loaded.agentDir, "evals"))) {
     await cp(path.join(loaded.agentDir, "evals"), path.join(outDir, "evals"), { recursive: true });
   }
   console.log(`Exported ${target} package to ${outDir}`);
+}
+
+async function copySourceSkills(outDir, loaded) {
+  const sourceSkillsDir = path.join(loaded.agentDir, "skills");
+  if (existsSync(sourceSkillsDir)) {
+    await cp(sourceSkillsDir, path.join(outDir, "skills"), { recursive: true });
+  }
+}
+
+async function writeSharedToolchain(outDir, loaded, adapter, report) {
+  const sharedDir = path.join(outDir, "skills", "_shared");
+  const hasToolchain = Object.keys(getToolchainTools(loaded.toolchain)).length > 0;
+  const hasSharedFiles = loaded.assetFiles.length > 0 || loaded.fallbackFiles.length > 0;
+  if (!hasToolchain && !hasSharedFiles) return;
+
+  for (const file of loaded.assetFiles) {
+    const relative = path.relative(loaded.agentDir, file);
+    const target = path.join(sharedDir, mapSharedAssetTarget(relative));
+    await mkdir(path.dirname(target), { recursive: true });
+    await cp(file, target, { recursive: true });
+  }
+  for (const file of loaded.fallbackFiles) {
+    const relative = path.relative(loaded.agentDir, file);
+    const target = path.join(sharedDir, mapSharedAssetTarget(relative));
+    await mkdir(path.dirname(target), { recursive: true });
+    await cp(file, target, { recursive: true });
+  }
+
+  const reportBody = renderToolchainReport(loaded, adapter, report);
+  await writeText(path.join(sharedDir, "TOOLCHAIN.md"), reportBody);
+  await writeText(path.join(outDir, "tool-migration-report.md"), reportBody);
 }
 
 async function writeAgentTypeFiles(agentDir, type) {
@@ -491,6 +594,10 @@ ${adapter.setup.map((item) => `- ${item}`).join("\n")}
 
 ${skills.join("\n\n")}
 
+## Toolchain Reuse
+
+${renderToolchainSummary(loaded)}
+
 ## Migration Notes
 
 ${adapter.notes.map((item) => `- ${item}`).join("\n")}
@@ -509,9 +616,110 @@ ${report.rows.map((row) => `- ${row.name}: ${row.status} (${row.support})`).join
 ## Working Rules
 
 - Prefer project skills in \`skills/\` when they apply.
+- Before writing a new parser, exporter, browser helper, or automation script, check \`skills/_shared/TOOLCHAIN.md\`, \`skills/_shared/fallbacks/\`, \`skills/_shared/references/\`, and \`skills/_shared/templates/\`.
 - When a required capability is unavailable, state the missing capability and use the documented fallback.
 - Do not pretend a platform-native tool exists when it is not available in the current environment.
 `;
+}
+
+function renderToolchainSummary(loaded) {
+  const tools = getToolchainTools(loaded.toolchain);
+  if (!Object.keys(tools).length && !loaded.assetFiles.length && !loaded.fallbackFiles.length) {
+    return "No shared toolchain assets or fallback implementations were declared.";
+  }
+  return [
+    "This export may include reusable toolchain resources under `skills/_shared/`.",
+    "Check these files before writing new parsing, export, browser, or automation scripts:",
+    "",
+    "- `skills/_shared/TOOLCHAIN.md`",
+    "- `skills/_shared/references/`",
+    "- `skills/_shared/templates/`",
+    "- `skills/_shared/fallbacks/`"
+  ].join("\n");
+}
+
+function renderToolchainReport(loaded, adapter, report) {
+  const tools = getToolchainTools(loaded.toolchain);
+  const capabilityRows = new Map(report.rows.map((row) => [row.name, row]));
+  const lines = [];
+  lines.push(`# ${loaded.agent.name} Toolchain`);
+  lines.push("");
+  lines.push("This file describes reusable resources that travel with the agent. Check this file before writing a new parser, exporter, browser helper, automation script, or template filler.");
+  lines.push("");
+  lines.push(`Target platform: ${adapter.name}`);
+  lines.push("");
+
+  if (loaded.assetFiles.length || loaded.fallbackFiles.length) {
+    lines.push("## Packaged Shared Resources");
+    lines.push("");
+    if (loaded.assetFiles.length) {
+      lines.push("Assets copied under `skills/_shared/`:");
+      for (const file of loaded.assetFiles) {
+        const relative = normalizeRelativePath(path.relative(loaded.agentDir, file));
+        lines.push(`- ${mapSharedAssetTarget(relative)}`);
+      }
+      lines.push("");
+    }
+    if (loaded.fallbackFiles.length) {
+      lines.push("Fallbacks copied under `skills/_shared/fallbacks/`:");
+      for (const file of loaded.fallbackFiles) {
+        const relative = normalizeRelativePath(path.relative(loaded.agentDir, file));
+        lines.push(`- ${mapSharedAssetTarget(relative)}`);
+      }
+      lines.push("");
+    }
+  }
+
+  if (!Object.keys(tools).length) {
+    lines.push("## Tool Contracts");
+    lines.push("");
+    lines.push("No `toolchain.json` contracts were declared.");
+    return lines.join("\n") + "\n";
+  }
+
+  lines.push("## Tool Contracts");
+  lines.push("");
+  for (const [name, spec] of Object.entries(tools)) {
+    lines.push(`### ${name}`);
+    lines.push("");
+    if (spec.purpose) lines.push(`Purpose: ${spec.purpose}`);
+    if (spec.usedBy?.length) lines.push(`Used by: ${spec.usedBy.join(", ")}`);
+    if (spec.requires?.length) {
+      lines.push("");
+      lines.push("| Required capability | Current status | Platform support |");
+      lines.push("|---|---|---|");
+      for (const capability of spec.requires) {
+        const row = capabilityRows.get(capability);
+        lines.push(`| ${capability} | ${row?.status || "unknown"} | ${row?.support || "unknown"} |`);
+      }
+    }
+    if (spec.assets?.length) {
+      lines.push("");
+      lines.push("Packaged assets:");
+      for (const item of spec.assets) lines.push(`- ${mapSharedAssetTarget(item)}`);
+    }
+    if (spec.fallbacks?.length) {
+      lines.push("");
+      lines.push("Reusable fallbacks:");
+      for (const item of spec.fallbacks) lines.push(`- ${mapSharedAssetTarget(item)}`);
+    }
+    if (spec.install?.length) {
+      lines.push("");
+      lines.push("Install or runtime notes:");
+      for (const item of spec.install) lines.push(`- ${item}`);
+    }
+    if (spec.whenMissing?.length) {
+      lines.push("");
+      lines.push("If native support is missing:");
+      for (const item of spec.whenMissing) lines.push(`- ${item}`);
+    }
+    if (spec.riskIfMissing) {
+      lines.push("");
+      lines.push(`Risk if missing: ${spec.riskIfMissing}`);
+    }
+    lines.push("");
+  }
+  return lines.join("\n").trimEnd() + "\n";
 }
 
 async function writeOpenClawWorkspace(outDir, loaded, report) {
@@ -559,6 +767,8 @@ Migration support files:
 - \`setup-guide.md\`: installation guide for humans.
 - \`compatibility-report.md\`: portability audit output.
 - \`SKILL.md\`: compatibility index for platforms that expect a single skill document.
+- \`tool-migration-report.md\`: reusable toolchain, assets, fallback scripts, and install notes.
+- \`skills/_shared/\`: shared references, templates, fallback implementations, and \`TOOLCHAIN.md\`.
 
 ## First Run
 
@@ -581,6 +791,7 @@ Do not rewrite \`IDENTITY.md\`, \`SOUL.md\`, or \`AGENTS.md\` during bootstrap u
 5. Read \`TOOLS.md\` before claiming or using any capability.
 6. Read \`MEMORY.md\` only when long-term project or user context is relevant.
 7. Read a file under \`skills/\` only when that skill applies to the task.
+8. Read \`skills/_shared/TOOLCHAIN.md\` before creating a new parser, exporter, browser helper, automation script, or template filler.
 
 Do not ask for permission to perform startup loading. Start working once the relevant files are loaded.
 
@@ -631,6 +842,7 @@ ${bodyWithoutTitle(loaded.instructions, "Agent Instructions") || "No source inst
 - State degraded or missing capabilities plainly.
 - Keep setup and migration instructions concrete and minimal.
 - Tie uncertainty to a verification path.
+- Reuse packaged toolchain assets before inventing new scripts.
 
 ## Boundaries
 
@@ -639,6 +851,7 @@ ${bodyWithoutTitle(loaded.instructions, "Agent Instructions") || "No source inst
 - Do not write secrets, credentials, cookies, tokens, or session state into workspace memory.
 - Do not overwrite user work or generated workspace files without a clear task reason.
 - Do not let bootstrap information mutate core identity or soul files without explicit user approval.
+- Do not recreate parsing, export, or automation scripts before checking \`skills/_shared/fallbacks/\`.
 `;
 }
 
@@ -727,6 +940,7 @@ ${bodyWithoutTitle(loaded.tools, "Tools") || "Add role-specific tool endpoints, 
 ## Tool Policy
 
 - Use platform-native tools first.
+- Reuse packaged resources in \`skills/_shared/\` before creating new scripts or templates.
 - Use fallback scripts or manual handoff only when native tools are unavailable.
 - Do not claim access to shell, browser, MCP, memory, or patch tools until the current OpenClaw instance exposes them.
 `;
@@ -853,6 +1067,13 @@ This file is a compatibility index for platforms that expect a single skill docu
 
 ${loaded.skillFiles.map((file) => `- skills/${file}`).join("\n") || "- none"}
 
+## Shared Toolchain
+
+- \`skills/_shared/TOOLCHAIN.md\`
+- \`skills/_shared/references/\`
+- \`skills/_shared/templates/\`
+- \`skills/_shared/fallbacks/\`
+
 ## Capability Contract
 
 ${report.rows.map((row) => `- ${row.name}: ${row.status}; fallback: ${row.fallbacks.join(" -> ") || "none"}`).join("\n")}
@@ -879,6 +1100,7 @@ ${loaded.skillFiles.map((file) => `- Read \`agent/skills/${file}\` or the export
 ## Migration Rules
 
 - Treat this \`CLAUDE.md\` as the Claude-family project instruction file.
+- Check \`skills/_shared/TOOLCHAIN.md\`, \`skills/_shared/fallbacks/\`, \`skills/_shared/references/\`, and \`skills/_shared/templates/\` before writing a new tool script.
 - Keep platform-specific tool claims conditional on the current environment.
 - When a required capability is unavailable, state the missing capability and use the documented fallback.
 `;
