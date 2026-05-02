@@ -1,0 +1,23 @@
+{
+  "name": "WorkBuddy",
+  "supports": {
+    "filesystem.read": "workspace_files_or_upload",
+    "filesystem.search": "limited_workspace_search_or_manual_index",
+    "shell.run": "limited_or_none",
+    "browser.use": "platform_browser_or_web_search",
+    "git.inspect": "limited_or_user_provided_diff",
+    "patch.edit": "platform_editor_or_manual_patch",
+    "mcp.use": "unknown",
+    "memory.persist": "workspace_memory_or_agent_settings"
+  },
+  "setup": [
+    "Create a custom agent or workspace assistant using setup-guide.md.",
+    "Convert skill sections into WorkBuddy workflow steps or reusable prompts.",
+    "Confirm whether the workspace has file access, search, command execution, and edit permissions before enabling codebase tasks."
+  ],
+  "notes": [
+    "WorkBuddy support is modeled conservatively because platform capabilities can vary by deployment.",
+    "Treat file search, shell execution, Git inspection, and patch editing as degraded until confirmed in the target workspace.",
+    "Run smoke tests after setup to identify hidden platform gaps."
+  ]
+}

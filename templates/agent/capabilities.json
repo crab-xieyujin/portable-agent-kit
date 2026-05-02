@@ -1,0 +1,52 @@
+{
+  "capabilities": {
+    "filesystem.read": {
+      "required": true,
+      "usedBy": ["codebase-reading", "document-analysis"],
+      "fallbacks": ["user_upload", "manual_paste"],
+      "riskIfMissing": "high"
+    },
+    "filesystem.search": {
+      "required": true,
+      "usedBy": ["codebase-reading", "debugging"],
+      "fallbacks": ["shell_rg", "python_text_search", "manual_index"],
+      "riskIfMissing": "high"
+    },
+    "shell.run": {
+      "required": false,
+      "usedBy": ["test-running", "dependency-inspection"],
+      "fallbacks": ["user_runs_command", "python_script_if_available"],
+      "riskIfMissing": "medium"
+    },
+    "browser.use": {
+      "required": false,
+      "usedBy": ["web-research", "visual-qa"],
+      "fallbacks": ["user_provides_links", "search_api", "manual_screenshots"],
+      "riskIfMissing": "medium"
+    },
+    "git.inspect": {
+      "required": false,
+      "usedBy": ["code-review", "change-summary"],
+      "fallbacks": ["user_provides_diff", "uploaded_patch"],
+      "riskIfMissing": "medium"
+    },
+    "patch.edit": {
+      "required": false,
+      "usedBy": ["code-editing", "bug-fixing"],
+      "fallbacks": ["manual_patch_instructions", "platform_editor"],
+      "riskIfMissing": "high"
+    },
+    "mcp.use": {
+      "required": false,
+      "usedBy": ["external-tools", "github", "browser", "database"],
+      "fallbacks": ["platform_native_integrations", "manual_steps"],
+      "riskIfMissing": "medium"
+    },
+    "memory.persist": {
+      "required": false,
+      "usedBy": ["personalization", "long-running-workflows"],
+      "fallbacks": ["project_memory_files", "user_supplied_context"],
+      "riskIfMissing": "low"
+    }
+  }
+}

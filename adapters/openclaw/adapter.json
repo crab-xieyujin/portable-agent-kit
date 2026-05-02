@@ -1,0 +1,22 @@
+{
+  "name": "OpenClaw",
+  "supports": {
+    "filesystem.read": "native_or_workspace_file_access",
+    "filesystem.search": "native_search_or_shell_if_enabled",
+    "shell.run": "limited_or_sandboxed",
+    "browser.use": "platform_browser_if_enabled",
+    "git.inspect": "limited_or_shell_git",
+    "patch.edit": "platform_edit_tool_or_manual_patch",
+    "mcp.use": "check_platform_support",
+    "memory.persist": "project_skill_files"
+  },
+  "setup": [
+    "Create a custom skill from the generated SKILL.md.",
+    "Attach project files or workspace permissions before running codebase-reading tasks.",
+    "Map missing shell and patch operations to the platform's own edit tools."
+  ],
+  "notes": [
+    "OpenClaw-like platforms often differ in shell and file-search behavior.",
+    "Run evals after setup to catch hidden dependency gaps."
+  ]
+}

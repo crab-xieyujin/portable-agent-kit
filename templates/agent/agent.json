@@ -1,0 +1,7 @@
+{
+  "name": "My Portable Agent",
+  "version": "0.1.0",
+  "description": "A portable AI agent package that can be exported to Codex, OpenClaw, Accio Work, Wukong, and other agent platforms.",
+  "author": "",
+  "homepage": ""
+}

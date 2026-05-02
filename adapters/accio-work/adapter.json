@@ -1,0 +1,22 @@
+{
+  "name": "Accio Work",
+  "supports": {
+    "filesystem.read": "upload_or_workspace_docs",
+    "filesystem.search": "limited_document_search",
+    "shell.run": "none",
+    "browser.use": "platform_agent_browser_or_web_search",
+    "git.inspect": "none",
+    "patch.edit": "none",
+    "mcp.use": "unknown",
+    "memory.persist": "platform_reusable_skills"
+  },
+  "setup": [
+    "Create a new custom agent manually using setup-guide.md.",
+    "Convert each skill section into an Accio reusable skill or workflow card.",
+    "Replace codebase automation with upload-based document analysis unless the platform adds shell/file tooling."
+  ],
+  "notes": [
+    "This target is best for business workflows, research, and structured output.",
+    "Developer workflows that require shell, Git, or patch editing are degraded or unsupported."
+  ]
+}

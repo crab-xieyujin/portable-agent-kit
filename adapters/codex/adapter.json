@@ -1,0 +1,22 @@
+{
+  "name": "Codex",
+  "supports": {
+    "filesystem.read": "native_workspace_read",
+    "filesystem.search": "shell_rg_or_native_search",
+    "shell.run": "native_shell",
+    "browser.use": "browser_plugin_or_playwright",
+    "git.inspect": "native_shell_git",
+    "patch.edit": "apply_patch",
+    "mcp.use": "supported",
+    "memory.persist": "project_files_or_skill_memory"
+  },
+  "setup": [
+    "Put the generated AGENTS.md at the repository root or the relevant workspace root.",
+    "Copy skills into the workspace if the target Codex setup supports custom skills.",
+    "Configure MCP servers from tools/mcp.json when required."
+  ],
+  "notes": [
+    "Codex can usually preserve developer-agent workflows with minimal degradation.",
+    "Keep platform-native rules explicit so future exports do not rely on hidden Codex behavior."
+  ]
+}

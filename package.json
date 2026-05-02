@@ -1,0 +1,28 @@
+{
+  "name": "portable-agent-kit",
+  "version": "0.1.0",
+  "description": "A small CLI and package format for exporting portable AI agents across platforms.",
+  "type": "module",
+  "bin": {
+    "portable-agent": "./src/cli.js",
+    "pak": "./src/cli.js"
+  },
+  "scripts": {
+    "start": "node ./src/cli.js",
+    "doctor": "node ./src/cli.js doctor --target codex",
+    "export": "node ./src/cli.js export --target codex"
+  },
+  "keywords": [
+    "agent",
+    "ai-agent",
+    "portable-agent",
+    "codex",
+    "mcp",
+    "skills"
+  ],
+  "author": "",
+  "license": "MIT",
+  "engines": {
+    "node": ">=18"
+  }
+}

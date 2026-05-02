@@ -1,0 +1,22 @@
+{
+  "name": "Wukong",
+  "supports": {
+    "filesystem.read": "workspace_docs_or_upload",
+    "filesystem.search": "platform_document_search_limited",
+    "shell.run": "none",
+    "browser.use": "platform_workflow_browser_or_search",
+    "git.inspect": "none",
+    "patch.edit": "none",
+    "mcp.use": "unknown",
+    "memory.persist": "workspace_memory_or_agent_settings"
+  },
+  "setup": [
+    "Create the agent manually with the role instructions from setup-guide.md.",
+    "Create workflow cards from skill-cards.md.",
+    "Use evals as acceptance tests after importing the workflows."
+  ],
+  "notes": [
+    "Wukong-style workspaces are usually stronger at office automation than repository mutation.",
+    "Treat code-reading and code-editing skills as degraded unless file, shell, and patch tools are explicitly available."
+  ]
+}
