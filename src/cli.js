@@ -155,6 +155,26 @@ function mapSharedAssetTarget(relativePath) {
   return normalized;
 }
 
+function normalizeExportedSkillBody(body) {
+  return body
+    .replace(/skill[\\/]+references[\\/]+/g, "skills/_shared/references/")
+    .replace(/skill[\\/]+templates[\\/]+/g, "skills/_shared/templates/")
+    .replace(/skill[\\/]+([^/\\\s`]+)[\\/]+SKILL\.md/g, "skills/$1.md");
+}
+
+async function readExportedSkillBody(loaded, file) {
+  const body = await readText(path.join(loaded.agentDir, "skills", file));
+  return normalizeExportedSkillBody(body);
+}
+
+async function writeExportedSkills(outDir, loaded) {
+  if (!loaded.skillFiles.length) return;
+  for (const file of loaded.skillFiles) {
+    const body = await readExportedSkillBody(loaded, file);
+    await writeText(path.join(outDir, "skills", file), body.trimEnd() + "\n");
+  }
+}
+
 function resolveAgentDir(args) {
   return path.resolve(ROOT, args.agent || "agent");
 }
@@ -419,6 +439,7 @@ async function exportCommand(args) {
     await copySourceSkills(outDir, loaded);
   }
   await writeSharedToolchain(outDir, loaded, adapter, report);
+  await validateExportedSkillPathReferences(outDir, loaded);
   await writeText(path.join(outDir, "compatibility-report.md"), renderDoctor(loaded.agent, adapter, report) + "\n");
   if (existsSync(path.join(loaded.agentDir, "evals"))) {
     await cp(path.join(loaded.agentDir, "evals"), path.join(outDir, "evals"), { recursive: true });
@@ -427,10 +448,7 @@ async function exportCommand(args) {
 }
 
 async function copySourceSkills(outDir, loaded) {
-  const sourceSkillsDir = path.join(loaded.agentDir, "skills");
-  if (existsSync(sourceSkillsDir)) {
-    await cp(sourceSkillsDir, path.join(outDir, "skills"), { recursive: true });
-  }
+  await writeExportedSkills(outDir, loaded);
 }
 
 async function writeSharedToolchain(outDir, loaded, adapter, report) {
@@ -579,7 +597,7 @@ ${preset.memorySlots.map((item) => `### ${item}\n\n-`).join("\n\n")}
 async function renderSetupGuide(loaded, adapter, report) {
   const skills = await Promise.all(
     loaded.skillFiles.map(async (file) => {
-      const body = await readText(path.join(loaded.agentDir, "skills", file));
+      const body = await readExportedSkillBody(loaded, file);
       return `## ${file.replace(/\.md$/, "")}\n\n${body.trim()}`;
     })
   );
@@ -745,10 +763,7 @@ async function writeOpenClawWorkspace(outDir, loaded, report) {
   await writeText(path.join(outDir, ".openclaw", "workspace-state.json"), renderOpenClawWorkspaceState(loaded));
   await writeText(path.join(outDir, "SKILL.md"), renderOpenClawSkillIndex(loaded, report));
 
-  const sourceSkillsDir = path.join(loaded.agentDir, "skills");
-  if (existsSync(sourceSkillsDir)) {
-    await cp(sourceSkillsDir, path.join(outDir, "skills"), { recursive: true });
-  }
+  await writeExportedSkills(outDir, loaded);
   validateOpenClawWorkspace(outDir, loaded);
 }
 
@@ -1069,6 +1084,25 @@ function validateOpenClawWorkspace(outDir, loaded) {
   }
 }
 
+async function validateExportedSkillPathReferences(outDir, loaded) {
+  const missing = [];
+  for (const file of loaded.skillFiles) {
+    const exportedSkill = path.join(outDir, "skills", file);
+    if (!existsSync(exportedSkill)) continue;
+    const body = await readText(exportedSkill);
+    for (const match of body.matchAll(/`([^`\r\n]+)`/g)) {
+      const normalized = normalizeRelativePath(match[1].trim());
+      if (!normalized.startsWith("skills/") || normalized.includes("*")) continue;
+      if (!existsSync(path.join(outDir, normalized))) {
+        missing.push(`skills/${file}: ${normalized}`);
+      }
+    }
+  }
+  if (missing.length) {
+    throw new Error(`Exported skills reference missing packaged files: ${missing.join(", ")}`);
+  }
+}
+
 function renderOpenClawSkillIndex(loaded, report) {
   return `# ${loaded.agent.name} Skills
 
@@ -1120,7 +1154,7 @@ ${loaded.skillFiles.map((file) => `- Read \`agent/skills/${file}\` or the export
 async function renderSkillCards(loaded) {
   const cards = [];
   for (const file of loaded.skillFiles) {
-    const body = await readText(path.join(loaded.agentDir, "skills", file));
+    const body = await readExportedSkillBody(loaded, file);
     cards.push(`# ${file.replace(/\.md$/, "")}\n\n${body.trim()}`);
   }
   return cards.join("\n\n---\n\n") + "\n";
