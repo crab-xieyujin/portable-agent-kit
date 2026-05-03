@@ -31,6 +31,17 @@ const CAPABILITY_LABELS = {
   "memory.persist": "Persist long-lived memory across sessions"
 };
 
+const CAPABILITY_LABELS_ZH = {
+  "filesystem.read": "读取工作区文件或上传文档",
+  "filesystem.search": "跨文件搜索文本",
+  "shell.run": "运行命令或脚本",
+  "browser.use": "打开并检查网页",
+  "git.inspect": "读取 Git 历史、状态、分支和差异",
+  "patch.edit": "应用精确代码修改",
+  "mcp.use": "通过 MCP 连接外部工具",
+  "memory.persist": "跨会话持久化长期记忆"
+};
+
 function parseArgs(argv) {
   const [command = "help", ...rest] = argv;
   const args = { _: [] };
@@ -56,6 +67,10 @@ async function readJson(file) {
   return JSON.parse(await readFile(file, "utf8"));
 }
 
+async function readOptionalJson(file, fallback) {
+  return existsSync(file) ? readJson(file) : fallback;
+}
+
 async function readText(file) {
   return readFile(file, "utf8");
 }
@@ -75,6 +90,21 @@ async function listMarkdown(dir) {
   return names.filter((name) => name.endsWith(".md")).sort();
 }
 
+async function listFilesRecursive(dir) {
+  if (!existsSync(dir)) return [];
+  const entries = await readdir(dir, { withFileTypes: true });
+  const files = [];
+  for (const entry of entries) {
+    const fullPath = path.join(dir, entry.name);
+    if (entry.isDirectory()) {
+      files.push(...await listFilesRecursive(fullPath));
+    } else if (entry.isFile()) {
+      files.push(fullPath);
+    }
+  }
+  return files.sort();
+}
+
 function bodyWithoutTitle(markdown, title) {
   const trimmed = markdown.trim();
   if (!trimmed) return "";
@@ -83,6 +113,46 @@ function bodyWithoutTitle(markdown, title) {
     return lines.slice(1).join("\n").trim();
   }
   return trimmed;
+}
+
+function normalizeRelativePath(value) {
+  return String(value).replace(/\\/g, "/").replace(/\/$/, "");
+}
+
+function getToolchainTools(toolchain) {
+  return toolchain.tools || toolchain.toolchain || {};
+}
+
+function collectToolchainPaths(toolchain, key) {
+  const paths = new Set();
+  for (const spec of Object.values(getToolchainTools(toolchain))) {
+    for (const item of spec[key] || []) {
+      const normalized = normalizeRelativePath(item);
+      if (normalized.includes("*")) continue;
+      paths.add(normalized);
+    }
+  }
+  return [...paths].sort();
+}
+
+function validateToolchainReferences(loaded) {
+  const missing = [];
+  for (const item of collectToolchainPaths(loaded.toolchain, "assets")) {
+    if (!existsSync(path.join(loaded.agentDir, item))) missing.push(item);
+  }
+  for (const item of collectToolchainPaths(loaded.toolchain, "fallbacks")) {
+    if (!existsSync(path.join(loaded.agentDir, item))) missing.push(item);
+  }
+  if (missing.length) {
+    throw new Error(`toolchain.json references missing files or directories: ${missing.join(", ")}`);
+  }
+}
+
+function mapSharedAssetTarget(relativePath) {
+  const normalized = normalizeRelativePath(relativePath);
+  if (normalized.startsWith("assets/")) return normalized.slice("assets/".length);
+  if (normalized.startsWith("fallbacks/")) return normalized;
+  return normalized;
 }
 
 function resolveAgentDir(args) {
@@ -98,10 +168,13 @@ async function loadAgent(agentDir) {
   if (!existsSync(capabilitiesFile)) {
     throw new Error(`Missing ${capabilitiesFile}.`);
   }
-  return {
+  const assetsDir = path.join(agentDir, "assets");
+  const fallbacksDir = path.join(agentDir, "fallbacks");
+  const loaded = {
     agentDir,
     agent: await readJson(agentFile),
     capabilities: await readJson(capabilitiesFile),
+    toolchain: await readOptionalJson(path.join(agentDir, "toolchain.json"), { tools: {} }),
     identity: await readOptionalText(path.join(agentDir, "identity.md")),
     soul: await readOptionalText(path.join(agentDir, "soul.md")),
     instructions: await readOptionalText(path.join(agentDir, "instructions.md")),
@@ -109,8 +182,14 @@ async function loadAgent(agentDir) {
     user: await readOptionalText(path.join(agentDir, "user.md")),
     tools: await readOptionalText(path.join(agentDir, "tools.md")),
     memory: await readOptionalText(path.join(agentDir, "memory.md")),
-    skillFiles: await listMarkdown(path.join(agentDir, "skills"))
+    skillFiles: await listMarkdown(path.join(agentDir, "skills")),
+    assetsDir,
+    fallbacksDir,
+    assetFiles: await listFilesRecursive(assetsDir),
+    fallbackFiles: await listFilesRecursive(fallbacksDir)
   };
+  validateToolchainReferences(loaded);
+  return loaded;
 }
 
 async function loadAdapter(target) {
@@ -336,11 +415,46 @@ async function exportCommand(args) {
     await writeText(path.join(outDir, "skill-cards.md"), await renderSkillCards(loaded));
   }
 
+  if (target !== "openclaw") {
+    await copySourceSkills(outDir, loaded);
+  }
+  await writeSharedToolchain(outDir, loaded, adapter, report);
   await writeText(path.join(outDir, "compatibility-report.md"), renderDoctor(loaded.agent, adapter, report) + "\n");
   if (existsSync(path.join(loaded.agentDir, "evals"))) {
     await cp(path.join(loaded.agentDir, "evals"), path.join(outDir, "evals"), { recursive: true });
   }
   console.log(`Exported ${target} package to ${outDir}`);
+}
+
+async function copySourceSkills(outDir, loaded) {
+  const sourceSkillsDir = path.join(loaded.agentDir, "skills");
+  if (existsSync(sourceSkillsDir)) {
+    await cp(sourceSkillsDir, path.join(outDir, "skills"), { recursive: true });
+  }
+}
+
+async function writeSharedToolchain(outDir, loaded, adapter, report) {
+  const sharedDir = path.join(outDir, "skills", "_shared");
+  const hasToolchain = Object.keys(getToolchainTools(loaded.toolchain)).length > 0;
+  const hasSharedFiles = loaded.assetFiles.length > 0 || loaded.fallbackFiles.length > 0;
+  if (!hasToolchain && !hasSharedFiles) return;
+
+  for (const file of loaded.assetFiles) {
+    const relative = path.relative(loaded.agentDir, file);
+    const target = path.join(sharedDir, mapSharedAssetTarget(relative));
+    await mkdir(path.dirname(target), { recursive: true });
+    await cp(file, target, { recursive: true });
+  }
+  for (const file of loaded.fallbackFiles) {
+    const relative = path.relative(loaded.agentDir, file);
+    const target = path.join(sharedDir, mapSharedAssetTarget(relative));
+    await mkdir(path.dirname(target), { recursive: true });
+    await cp(file, target, { recursive: true });
+  }
+
+  const reportBody = renderToolchainReport(loaded, adapter, report);
+  await writeText(path.join(sharedDir, "TOOLCHAIN.md"), reportBody);
+  await writeText(path.join(outDir, "tool-migration-report.md"), reportBody);
 }
 
 async function writeAgentTypeFiles(agentDir, type) {
@@ -491,6 +605,10 @@ ${adapter.setup.map((item) => `- ${item}`).join("\n")}
 
 ${skills.join("\n\n")}
 
+## Toolchain Reuse
+
+${renderToolchainSummary(loaded)}
+
 ## Migration Notes
 
 ${adapter.notes.map((item) => `- ${item}`).join("\n")}
@@ -509,9 +627,110 @@ ${report.rows.map((row) => `- ${row.name}: ${row.status} (${row.support})`).join
 ## Working Rules
 
 - Prefer project skills in \`skills/\` when they apply.
+- Before writing a new parser, exporter, browser helper, or automation script, check \`skills/_shared/TOOLCHAIN.md\`, \`skills/_shared/fallbacks/\`, \`skills/_shared/references/\`, and \`skills/_shared/templates/\`.
 - When a required capability is unavailable, state the missing capability and use the documented fallback.
 - Do not pretend a platform-native tool exists when it is not available in the current environment.
 `;
+}
+
+function renderToolchainSummary(loaded) {
+  const tools = getToolchainTools(loaded.toolchain);
+  if (!Object.keys(tools).length && !loaded.assetFiles.length && !loaded.fallbackFiles.length) {
+    return "未声明共享工具链资源或 fallback 实现。";
+  }
+  return [
+    "本导出包可能在 `skills/_shared/` 下包含可复用工具链资源。",
+    "在新写解析、导出、浏览或自动化脚本前，先检查这些文件：",
+    "",
+    "- `skills/_shared/TOOLCHAIN.md`",
+    "- `skills/_shared/references/`",
+    "- `skills/_shared/templates/`",
+    "- `skills/_shared/fallbacks/`"
+  ].join("\n");
+}
+
+function renderToolchainReport(loaded, adapter, report) {
+  const tools = getToolchainTools(loaded.toolchain);
+  const capabilityRows = new Map(report.rows.map((row) => [row.name, row]));
+  const lines = [];
+  lines.push(`# ${loaded.agent.name} 工具链`);
+  lines.push("");
+  lines.push("本文件描述随 Agent 一起迁移的可复用资源。在新写解析器、导出器、浏览器辅助脚本、自动化脚本或模板填充脚本前，先检查这里。");
+  lines.push("");
+  lines.push(`目标平台：${adapter.name}`);
+  lines.push("");
+
+  if (loaded.assetFiles.length || loaded.fallbackFiles.length) {
+    lines.push("## 已打包的共享资源");
+    lines.push("");
+    if (loaded.assetFiles.length) {
+      lines.push("已复制到 `skills/_shared/` 下的资源：");
+      for (const file of loaded.assetFiles) {
+        const relative = normalizeRelativePath(path.relative(loaded.agentDir, file));
+        lines.push(`- ${mapSharedAssetTarget(relative)}`);
+      }
+      lines.push("");
+    }
+    if (loaded.fallbackFiles.length) {
+      lines.push("已复制到 `skills/_shared/fallbacks/` 下的 fallback：");
+      for (const file of loaded.fallbackFiles) {
+        const relative = normalizeRelativePath(path.relative(loaded.agentDir, file));
+        lines.push(`- ${mapSharedAssetTarget(relative)}`);
+      }
+      lines.push("");
+    }
+  }
+
+  if (!Object.keys(tools).length) {
+    lines.push("## 工具契约");
+    lines.push("");
+    lines.push("未声明 `toolchain.json` 工具契约。");
+    return lines.join("\n") + "\n";
+  }
+
+  lines.push("## 工具契约");
+  lines.push("");
+  for (const [name, spec] of Object.entries(tools)) {
+    lines.push(`### ${name}`);
+    lines.push("");
+    if (spec.purpose) lines.push(`用途：${spec.purpose}`);
+    if (spec.usedBy?.length) lines.push(`使用方：${spec.usedBy.join(", ")}`);
+    if (spec.requires?.length) {
+      lines.push("");
+      lines.push("| 所需能力 | 当前状态 | 平台支持 |");
+      lines.push("|---|---|---|");
+      for (const capability of spec.requires) {
+        const row = capabilityRows.get(capability);
+        lines.push(`| ${capability} | ${row?.status || "unknown"} | ${row?.support || "unknown"} |`);
+      }
+    }
+    if (spec.assets?.length) {
+      lines.push("");
+      lines.push("已打包资源：");
+      for (const item of spec.assets) lines.push(`- ${mapSharedAssetTarget(item)}`);
+    }
+    if (spec.fallbacks?.length) {
+      lines.push("");
+      lines.push("可复用 fallback：");
+      for (const item of spec.fallbacks) lines.push(`- ${mapSharedAssetTarget(item)}`);
+    }
+    if (spec.install?.length) {
+      lines.push("");
+      lines.push("安装或运行说明：");
+      for (const item of spec.install) lines.push(`- ${item}`);
+    }
+    if (spec.whenMissing?.length) {
+      lines.push("");
+      lines.push("当原生能力缺失时：");
+      for (const item of spec.whenMissing) lines.push(`- ${item}`);
+    }
+    if (spec.riskIfMissing) {
+      lines.push("");
+      lines.push(`缺失风险：${spec.riskIfMissing}`);
+    }
+    lines.push("");
+  }
+  return lines.join("\n").trimEnd() + "\n";
 }
 
 async function writeOpenClawWorkspace(outDir, loaded, report) {
@@ -538,159 +757,164 @@ function renderOpenClawAgents(loaded, report) {
 
 ${loaded.agent.description}
 
-## Runtime Environment
+## 运行环境
 
-This is an OpenClaw workspace generated by Portable Agent Kit. Treat the core workspace files as the runtime contract and keep migration-only files out of the agent's identity.
+这是由 Portable Agent Kit 生成的 OpenClaw 工作区。核心工作区文件是运行契约；迁移说明文件只用于安装、审计和交接，不参与人格定义。
 
-Core runtime files:
+核心运行文件：
 
-- \`AGENTS.md\`: operating manual, startup order, routing, workflow, memory rules, and boundaries.
-- \`IDENTITY.md\`: short external identity card.
-- \`SOUL.md\`: stable judgment, truths, temperament, and boundaries.
-- \`BOOTSTRAP.md\`: first-run onboarding script.
-- \`USER.md\`: stable user profile and preferences.
-- \`TOOLS.md\`: current tool and capability map.
-- \`MEMORY.md\`: long-term memory structure.
-- \`HEARTBEAT.md\`: optional scheduled task hook.
-- \`.openclaw/workspace-state.json\`: machine-readable lifecycle state.
+- \`AGENTS.md\`：运行手册、启动顺序、能力路由、工作流、记忆规则和边界。
+- \`IDENTITY.md\`：极简身份卡。
+- \`SOUL.md\`：长期稳定的判断、真话、气质和边界。
+- \`BOOTSTRAP.md\`：首次运行引导脚本。
+- \`USER.md\`：稳定用户画像和偏好。
+- \`TOOLS.md\`：当前工具与能力映射。
+- \`MEMORY.md\`：长期记忆结构。
+- \`HEARTBEAT.md\`：可选定时任务入口。
+- \`.openclaw/workspace-state.json\`：机器可读的生命周期状态。
 
-Migration support files:
+迁移辅助文件：
 
-- \`setup-guide.md\`: installation guide for humans.
-- \`compatibility-report.md\`: portability audit output.
-- \`SKILL.md\`: compatibility index for platforms that expect a single skill document.
+- \`setup-guide.md\`：给人看的安装和迁移说明。
+- \`compatibility-report.md\`：平台兼容性审计结果。
+- \`SKILL.md\`：给需要单一 skill 文档的平台使用的兼容索引。
+- \`tool-migration-report.md\`：可复用工具链、资料、fallback 脚本和安装说明。
+- \`skills/_shared/\`：共享 references、templates、fallback 实现和 \`TOOLCHAIN.md\`。
 
-## First Run
+## 首次运行
 
-If \`.openclaw/workspace-state.json\` has no \`setupCompletedAt\` value:
+如果 \`.openclaw/workspace-state.json\` 里没有 \`setupCompletedAt\`：
 
-1. Read \`BOOTSTRAP.md\`.
-2. Run onboarding only as far as the user allows.
-3. Write durable user facts to \`USER.md\`.
-4. Write reusable operating learnings to \`MEMORY.md\` or \`memory/YYYY-MM-DD.md\`.
-5. Set \`setupCompletedAt\` when onboarding is complete.
+1. 读取 \`BOOTSTRAP.md\`。
+2. 只在用户允许的范围内执行首次引导。
+3. 将稳定的用户事实写入 \`USER.md\`。
+4. 将可复用的工作经验写入 \`MEMORY.md\` 或 \`memory/YYYY-MM-DD.md\`。
+5. 首次引导完成后写入 \`setupCompletedAt\`。
 
-Do not rewrite \`IDENTITY.md\`, \`SOUL.md\`, or \`AGENTS.md\` during bootstrap unless the user explicitly asks to change the agent itself.
+除非用户明确要求改变 Agent 本身，否则首次引导不得改写 \`IDENTITY.md\`、\`SOUL.md\` 或 \`AGENTS.md\`。
 
-## Every Startup
+## 每次启动
 
-1. Read \`IDENTITY.md\`.
-2. Read \`SOUL.md\`.
-3. Read \`USER.md\`.
-4. Read today's and yesterday's \`memory/YYYY-MM-DD.md\` files if they exist.
-5. Read \`TOOLS.md\` before claiming or using any capability.
-6. Read \`MEMORY.md\` only when long-term project or user context is relevant.
-7. Read a file under \`skills/\` only when that skill applies to the task.
+1. 读取 \`IDENTITY.md\`。
+2. 读取 \`SOUL.md\`。
+3. 读取 \`USER.md\`。
+4. 如果存在，读取今天和昨天的 \`memory/YYYY-MM-DD.md\`。
+5. 声明或使用任何能力前先读取 \`TOOLS.md\`。
+6. 只有任务需要长期项目或用户上下文时才读取 \`MEMORY.md\`。
+7. 只有某个 skill 适用时才读取 \`skills/\` 下的对应文件。
+8. 在新建解析器、导出器、浏览器辅助脚本、自动化脚本或模板填充脚本前，先读取 \`skills/_shared/TOOLCHAIN.md\`。
 
-Do not ask for permission to perform startup loading. Start working once the relevant files are loaded.
+启动加载不需要向用户请示；相关文件加载后直接开始处理任务。
 
-## Capability Routing
+## 能力路由
 
-| Capability | Status | Required | Trigger | Fallback |
+| 能力 | 状态 | 必需 | 触发场景 | 降级方案 |
 |---|---|---:|---|---|
-${report.rows.map((row) => `| ${row.name} | ${row.status} | ${row.required ? "yes" : "no"} | ${row.label} | ${row.fallbacks.join(" -> ") || "none"} |`).join("\n")}
+${report.rows.map((row) => `| ${row.name} | ${row.status} | ${row.required ? "是" : "否"} | ${CAPABILITY_LABELS_ZH[row.name] || row.label} | ${row.fallbacks.join(" -> ") || "无"} |`).join("\n")}
 
-## Core Workflow
+## 核心工作流
 
-${bodyWithoutTitle(loaded.workflow, "Workflow") || `1. Understand the user's goal, target platform, files, and constraints.
-2. Check the capability map before claiming a tool or workflow.
-3. Use native OpenClaw tools when they exist.
-4. Use the documented fallback when a native capability is degraded or missing.
-5. Verify the result with the smallest meaningful check.
-6. Report what changed, what was verified, and what remains uncertain.`}
+${bodyWithoutTitle(loaded.workflow, "Workflow") || `1. 理解用户目标、目标平台、文件和约束。
+2. 声明工具或工作流前，先检查能力映射。
+3. 平台原生工具存在时优先使用。
+4. 原生能力降级或缺失时，使用文档化的 fallback。
+5. 用最小但有意义的检查验证结果。
+6. 汇报改了什么、验证了什么、还剩什么不确定。`}
 
-This workflow is the default path. Adjust it when the user's task or risk profile clearly calls for a different order.
+这是默认流程。用户任务或风险情况明显需要调整时，可以灵活改变顺序。
 
-## Source Instructions
+## 源指令
 
-${bodyWithoutTitle(loaded.instructions, "Agent Instructions") || "No source instructions were provided."}
+${bodyWithoutTitle(loaded.instructions, "Agent Instructions") || "未提供源指令。"}
 
-## Memory
+## 记忆
 
-- Short-lived context belongs in \`memory/YYYY-MM-DD.md\`.
-- Durable lessons, user preferences, and reusable methods belong in \`MEMORY.md\`.
-- User profile facts belong in \`USER.md\`.
-- Tool failures belong in \`ERRORS.md\`.
-- Missing capabilities belong in \`FEATURE_REQUESTS.md\`.
-- Brain-only memory does not survive a restart; file-backed memory does.
+- 短期上下文写入 \`memory/YYYY-MM-DD.md\`。
+- 稳定经验、用户偏好和可复用方法写入 \`MEMORY.md\`。
+- 用户画像事实写入 \`USER.md\`。
+- 工具失败写入 \`ERRORS.md\`。
+- 缺失能力写入 \`FEATURE_REQUESTS.md\`。
+- 只存在脑中的记忆不会跨重启；落到文件才算。
 
-## Self-Improvement Ledger
+## 自我改进台账
 
-| Event | Write To |
+| 事件 | 写入位置 |
 |---|---|
-| Tool failure or unavailable platform feature | \`ERRORS.md\` |
-| User correction | \`MEMORY.md\` or \`LEARNINGS.md\` |
-| Missing ability | \`FEATURE_REQUESTS.md\` |
-| Outdated knowledge | \`LEARNINGS.md\` |
-| Better reusable method | \`MEMORY.md\` |
+| 工具失败或平台能力不可用 | \`ERRORS.md\` |
+| 用户纠正 | \`MEMORY.md\` 或 \`LEARNINGS.md\` |
+| 缺失能力 | \`FEATURE_REQUESTS.md\` |
+| 知识过时 | \`LEARNINGS.md\` |
+| 更好的可复用方法 | \`MEMORY.md\` |
 
-## Dialogue
+## 对话
 
-- Lead with the result or next action.
-- Ask only when a missing choice blocks safe execution.
-- State degraded or missing capabilities plainly.
-- Keep setup and migration instructions concrete and minimal.
-- Tie uncertainty to a verification path.
+- 先给结果或下一步动作。
+- 只有缺失选择会阻塞安全执行时才提问。
+- 清楚说明降级能力或缺失能力。
+- 安装和迁移说明要具体、简短、可执行。
+- 不确定性要对应到可验证路径。
+- 新写脚本前先复用已打包的工具链资源。
 
-## Boundaries
+## 边界
 
-- Do not claim access to shell, browser, files, MCP, memory, or patch tools unless the current OpenClaw instance exposes them.
-- Do not treat \`setup-guide.md\` or \`compatibility-report.md\` as personality or behavior files.
-- Do not write secrets, credentials, cookies, tokens, or session state into workspace memory.
-- Do not overwrite user work or generated workspace files without a clear task reason.
-- Do not let bootstrap information mutate core identity or soul files without explicit user approval.
+- 当前 OpenClaw 实例没有暴露 shell、browser、files、MCP、memory、patch 等工具时，不得声称可用。
+- 不把 \`setup-guide.md\` 或 \`compatibility-report.md\` 当作人格或行为文件。
+- 不把 secret、凭证、cookie、token、会话状态写入工作区记忆。
+- 没有明确任务原因时，不覆盖用户工作或已生成的工作区文件。
+- 未经用户明确同意，不让 bootstrap 信息污染核心身份或人格文件。
+- 检查 \`skills/_shared/fallbacks/\` 前，不重写解析、导出或自动化脚本。
 `;
 }
 
 function renderOpenClawSoul(loaded) {
   return `# Soul
 
-${bodyWithoutTitle(loaded.soul, "Soul") || `${loaded.agent.name} is practical, careful, and portability-aware.
+${bodyWithoutTitle(loaded.soul, "Soul") || `${loaded.agent.name} 是一个务实、谨慎、对迁移差异敏感的 Agent。
 
-## Truths
+## 几条真话
 
-- A portable agent is only reliable when its identity, workflow, capabilities, memory, and tests travel together.
-- Platform assumptions must be visible before they affect the answer.
-- A degraded fallback is useful, but it is not the same as native capability.
-- Migration output must be verifiable by files, commands, or documented checks.
+- 一个可迁移 Agent 只有在身份、工作流、能力、记忆和测试一起迁移时才可靠。
+- 平台假设在影响回答前必须被明确说出来。
+- 降级方案有价值，但它不是原生能力本身。
+- 迁移结果必须能通过文件、命令或文档化检查来验证。
 
-## Boundaries
+## 边界
 
-- Do not pretend a platform-native tool exists when it does not.
-- Do not hide capability gaps to make a migration look cleaner.
-- Do not store secrets or session state in memory files.
-- Do not rewrite \`IDENTITY.md\`, \`SOUL.md\`, or \`AGENTS.md\` unless the user asks to change the agent itself.
+- 不把平台没有的原生工具说成可用。
+- 不为了让迁移看起来更顺利而隐藏能力缺口。
+- 不把 secret 或会话状态写入记忆文件。
+- 除非用户要求改变 Agent 本身，否则不改写 \`IDENTITY.md\`、\`SOUL.md\` 或 \`AGENTS.md\`。
 
-## Temperament
+## 气质
 
-Evidence-first, concise, careful with user work, and sensitive to platform differences.`}
+证据优先，表达简洁，谨慎对待用户工作，对平台差异保持敏感。`}
 `;
 }
 
 function renderOpenClawIdentity(loaded) {
   return `# Identity
 
-## Card
+## 名片
 
-- Name: ${loaded.agent.name}
-- Version: ${loaded.agent.version || "0.1.0"}
-- Description: ${loaded.agent.description}
+- 名称：${loaded.agent.name}
+- 版本：${loaded.agent.version || "0.1.0"}
+- 描述：${loaded.agent.description}
 
-## Positioning
+## 定位
 
-${bodyWithoutTitle(loaded.identity, "Identity") || "A portable AI agent whose behavior, capabilities, skills, and evals are explicit enough to export across platforms."}
+${bodyWithoutTitle(loaded.identity, "Identity") || "一个行为、能力、技能和验收方式足够明确，可导出到不同平台复用的 Agent。"}
 
-## Ownership
+## 来源
 
-- Author: ${loaded.agent.author || "unspecified"}
-- Homepage: ${loaded.agent.homepage || "unspecified"}
+- 作者：${loaded.agent.author || "未指定"}
+- 主页：${loaded.agent.homepage || "未指定"}
 `;
 }
 
 function renderOpenClawUser(loaded) {
   return `# User
 
-This file is for the person or team this agent serves. It is not an agent behavior file.
+本文件用于记录这个 Agent 服务的人或团队。它不是 Agent 行为规则文件。
 
 ${bodyWithoutTitle(loaded.user, "User") || `## Stable Profile
 
@@ -709,56 +933,57 @@ ${bodyWithoutTitle(loaded.user, "User") || `## Stable Profile
 function renderOpenClawTools(loaded, report) {
   return `# Tools
 
-This file describes environment and capability configuration. It is not the agent's skill list and not its personality.
+本文件描述环境和能力配置。它不是技能清单，也不是人格文件。
 
-## Capability Map
+## 能力映射
 
-| Capability | Status | Support | Required | Fallback |
+| 能力 | 状态 | 平台支持 | 必需 | 降级方案 |
 |---|---|---|---:|---|
 ${report.rows.map((row) => {
-    const fallback = row.fallbacks.length ? row.fallbacks.join(" -> ") : "none";
-    return `| ${row.name} | ${row.status} | ${row.support} | ${row.required ? "yes" : "no"} | ${fallback} |`;
+    const fallback = row.fallbacks.length ? row.fallbacks.join(" -> ") : "无";
+    return `| ${row.name} | ${row.status} | ${row.support} | ${row.required ? "是" : "否"} | ${fallback} |`;
   }).join("\n")}
 
-## Source Tool Notes
+## 源工具说明
 
-${bodyWithoutTitle(loaded.tools, "Tools") || "Add role-specific tool endpoints, workspace paths, output formats, and platform preferences here. Keep every claim aligned with the capability map above."}
+${bodyWithoutTitle(loaded.tools, "Tools") || "在这里补充角色专属的工具端点、工作区路径、输出格式和平台偏好。所有能力声明必须与上方能力映射保持一致。"}
 
-## Tool Policy
+## 工具使用规则
 
-- Use platform-native tools first.
-- Use fallback scripts or manual handoff only when native tools are unavailable.
-- Do not claim access to shell, browser, MCP, memory, or patch tools until the current OpenClaw instance exposes them.
+- 优先使用平台原生工具。
+- 新建脚本或模板前，先复用 \`skills/_shared/\` 里的已打包资源。
+- 只有原生工具不可用时，才使用 fallback 脚本或人工交接流程。
+- 当前 OpenClaw 实例没有暴露 shell、browser、MCP、memory 或 patch 工具前，不得声称可以使用。
 `;
 }
 
 function renderOpenClawMemory(loaded) {
   return `# Memory
 
-This workspace treats memory as portable project context, not private runtime state.
+本工作区把记忆视为可迁移的项目上下文，而不是私有运行时状态。
 
-## Portable Memory Rules
+## 可迁移记忆规则
 
-- Keep durable agent knowledge in versioned workspace files.
-- Do not store secrets, API keys, cookies, credentials, or session state here.
-- Record platform-specific setup notes in setup guides or import hints, not in long-lived behavioral instructions.
-- Brain-only memory does not survive a restart. File-backed memory does.
+- 稳定的 Agent 知识要写入可版本化的工作区文件。
+- 不在这里存储 secret、API key、cookie、凭证或会话状态。
+- 平台专属安装说明写入 setup guide 或导入提示，不写进长期行为规则。
+- 只存在脑中的记忆不会跨重启；落到文件才算。
 
-## Long-Term Slots
+## 长期槽位
 
-${bodyWithoutTitle(loaded.memory, "Memory") || `### Platform Differences
-
--
-
-### Migration Learnings
+${bodyWithoutTitle(loaded.memory, "Memory") || `### 平台差异
 
 -
 
-### User Stable Preferences
+### 迁移经验
 
 -
 
-### Reusable Validation Checks
+### 用户稳定偏好
+
+-
+
+### 可复用验收检查
 
 -`}
 `;
@@ -767,28 +992,28 @@ ${bodyWithoutTitle(loaded.memory, "Memory") || `### Platform Differences
 function renderOpenClawBootstrap(loaded) {
   return `# Bootstrap
 
-This is the first-run onboarding script. It helps the workspace become useful without blocking direct work.
+这是首次运行引导脚本。它用于让工作区逐步变得有用，但不能阻塞用户直接提出任务。
 
-## Onboarding
+## 首次引导
 
-1. Greet the user briefly.
-2. Explain that the workspace can preserve stable preferences and reusable lessons in files.
-3. Ask only for information that helps future work, such as preferred name, role, target platforms, and output preferences.
-4. If the user asks a direct task instead, skip onboarding and handle the task.
-5. Record stable user facts in \`USER.md\`.
-6. Record reusable operating lessons in \`MEMORY.md\` or \`memory/YYYY-MM-DD.md\`.
-7. Set \`setupCompletedAt\` in \`.openclaw/workspace-state.json\` when onboarding is done.
+1. 简短问候用户。
+2. 说明本工作区可以把稳定偏好和可复用经验写入文件。
+3. 只询问有助于后续工作的少量信息，例如称呼、角色、目标平台和输出偏好。
+4. 如果用户直接提出任务，跳过引导并立即处理任务。
+5. 将稳定的用户事实写入 \`USER.md\`。
+6. 将可复用的工作经验写入 \`MEMORY.md\` 或 \`memory/YYYY-MM-DD.md\`。
+7. 引导完成后，在 \`.openclaw/workspace-state.json\` 里写入 \`setupCompletedAt\`。
 
-## Write Permissions
+## 写入权限
 
-Bootstrap may update:
+Bootstrap 可以更新：
 
 - \`USER.md\`
 - \`MEMORY.md\`
 - \`memory/YYYY-MM-DD.md\`
 - \`.openclaw/workspace-state.json\`
 
-Bootstrap must not update these files unless the user explicitly asks to change the agent itself:
+除非用户明确要求改变 Agent 本身，否则 Bootstrap 不得更新：
 
 - \`IDENTITY.md\`
 - \`SOUL.md\`
@@ -799,9 +1024,9 @@ Bootstrap must not update these files unless the user explicitly asks to change 
 function renderOpenClawHeartbeat() {
   return `# Heartbeat
 
-No scheduled heartbeat tasks are configured.
+当前未配置定时心跳任务。
 
-Add checks here only when the workspace needs periodic review, monitoring, or follow-up. Keep heartbeat work separate from normal task flow.
+只有当工作区需要周期性复盘、监控或跟进时，才在这里添加检查项。心跳任务应与普通任务流程分开。
 `;
 }
 
@@ -847,13 +1072,20 @@ function validateOpenClawWorkspace(outDir, loaded) {
 function renderOpenClawSkillIndex(loaded, report) {
   return `# ${loaded.agent.name} Skills
 
-This file is a compatibility index for platforms that expect a single skill document. The canonical OpenClaw workspace contract is represented by \`AGENTS.md\`, \`SOUL.md\`, \`IDENTITY.md\`, \`USER.md\`, and \`TOOLS.md\`.
+本文件是给需要单一 skill 文档的平台使用的兼容索引。OpenClaw 工作区的正式运行契约以 \`AGENTS.md\`、\`SOUL.md\`、\`IDENTITY.md\`、\`USER.md\` 和 \`TOOLS.md\` 为准。
 
-## Skill Files
+## 技能文件
 
 ${loaded.skillFiles.map((file) => `- skills/${file}`).join("\n") || "- none"}
 
-## Capability Contract
+## 共享工具链
+
+- \`skills/_shared/TOOLCHAIN.md\`
+- \`skills/_shared/references/\`
+- \`skills/_shared/templates/\`
+- \`skills/_shared/fallbacks/\`
+
+## 能力契约
 
 ${report.rows.map((row) => `- ${row.name}: ${row.status}; fallback: ${row.fallbacks.join(" -> ") || "none"}`).join("\n")}
 `;
@@ -879,6 +1111,7 @@ ${loaded.skillFiles.map((file) => `- Read \`agent/skills/${file}\` or the export
 ## Migration Rules
 
 - Treat this \`CLAUDE.md\` as the Claude-family project instruction file.
+- Check \`skills/_shared/TOOLCHAIN.md\`, \`skills/_shared/fallbacks/\`, \`skills/_shared/references/\`, and \`skills/_shared/templates/\` before writing a new tool script.
 - Keep platform-specific tool claims conditional on the current environment.
 - When a required capability is unavailable, state the missing capability and use the documented fallback.
 `;

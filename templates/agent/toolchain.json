@@ -1,0 +1,17 @@
+{
+  "tools": {
+    "resource.reuse": {
+      "purpose": "Describe shared references, templates, examples, fallback scripts, or other reusable implementation resources that should travel with this agent.",
+      "usedBy": [],
+      "requires": ["filesystem.read"],
+      "assets": ["assets/references/README.md", "assets/templates/README.md"],
+      "fallbacks": ["fallbacks/README.md"],
+      "install": [],
+      "whenMissing": [
+        "Check whether the target platform can use the packaged shared resources.",
+        "If not, ask the user to upload, paste, or run the fallback resource manually."
+      ],
+      "riskIfMissing": "medium"
+    }
+  }
+}
