@@ -267,6 +267,8 @@ The optional core files let one source package export richer workspace-shaped ag
 
 Exports copy shared resources to `skills/_shared/` and generate `tool-migration-report.md`. Target agents should check `skills/_shared/TOOLCHAIN.md`, `references/`, `templates/`, and `fallbacks/` before writing new parsing, export, browser, or automation scripts.
 
+During export, skill files are normalized for the generated package: source references such as `skill/references/...`, `skill/templates/...`, and `skill/<name>/SKILL.md` are rewritten to the exported `skills/_shared/...` or `skills/<name>.md` paths. The CLI then checks exported skill path references so missing references and templates fail fast instead of becoming broken migration notes.
+
 ### Platform Adapters
 
 Adapters live in:
